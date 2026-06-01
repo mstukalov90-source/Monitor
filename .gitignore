@@ -1,0 +1,10 @@
+.env
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+Data_mos_export.geojson
+Data_mos_export.gpkg
+*_raw.json
+/id_rsa
+/id_rsa.pub
