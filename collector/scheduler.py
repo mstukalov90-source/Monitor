@@ -3,7 +3,7 @@ Scheduler for MONITOR data collector.
 
 Daily schedule (Europe/Moscow):
   03:00 — data_mos (all 8 exports sequentially)
-  04:00 — lens sync from remote SPS
+  04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
   05:00 — genplan response_*.json import
 """
 
@@ -18,7 +18,12 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from collector.config import DATA_MOS_EXPORTS, TZ
-from collector.jobs import data_mos_job, genplan_job, lens_sync_job
+from collector.jobs import (
+    data_mos_job,
+    genplan_job,
+    lens_sync_job,
+    stroymonitoring_sync_job,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,10 +33,18 @@ logging.basicConfig(
 logger = logging.getLogger("collector.scheduler")
 
 
+def run_lens_pipeline() -> None:
+    """Run lens_sync then stroymonitoring_sync (04:00 chain)."""
+    lens_sync_job.run()
+    stroymonitoring_sync_job.run()
+
+
 def _build_jobs() -> dict[str, Callable[[], None]]:
     jobs: dict[str, Callable[[], None]] = {
         "data_mos": data_mos_job.run_all_data_mos,
+        "lens_pipeline": run_lens_pipeline,
         "lens_sync": lens_sync_job.run,
+        "stroymonitoring_sync": stroymonitoring_sync_job.run,
         "genplan": genplan_job.run,
     }
     for config in DATA_MOS_EXPORTS:
@@ -40,6 +53,13 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
 
 
 JOBS = _build_jobs()
+
+# Order for --run-all (no duplicate lens / stroymonitoring entries).
+RUN_ALL_ORDER: tuple[str, ...] = (
+    "data_mos",
+    "lens_pipeline",
+    "genplan",
+)
 
 
 def run_job(name: str) -> None:
@@ -60,10 +80,10 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
-        lens_sync_job.run,
+        run_lens_pipeline,
         CronTrigger(hour=4, minute=0, timezone=TZ),
-        id="lens_sync",
-        name="Lens sync from remote SPS",
+        id="lens_pipeline",
+        name="Lens sync + stroymonitoring sync",
         replace_existing=True,
     )
     scheduler.add_job(
@@ -78,7 +98,7 @@ def start_scheduler() -> None:
     logger.info("  03:00 — data_mos (%s services)", len(DATA_MOS_EXPORTS))
     for config in DATA_MOS_EXPORTS:
         logger.info("         — %s", config.job_name)
-    logger.info("  04:00 — lens_sync")
+    logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  05:00 — genplan")
 
     try:
@@ -104,7 +124,7 @@ def main() -> None:
     if args.run:
         run_job(args.run)
     elif args.run_all:
-        for name in JOBS:
+        for name in RUN_ALL_ORDER:
             run_job(name)
     else:
         start_scheduler()

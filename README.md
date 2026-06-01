@@ -7,7 +7,7 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 | Vremya | Zadacha | Opisanie |
 |-------|--------|----------|
 | 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` podryad → `data_mos.items_<id>` |
-| 04:00 | `lens_sync` | Kopirovanie tablits iz `public` udalennoy BD `sps` v lokalnuyu skhemu `lens` |
+| 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
 | 05:00 | `genplan` | Import `response_*.json` v `genplan.responses`, udalenie obrabotannykh faylov |
 
 Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
@@ -68,8 +68,10 @@ docker compose exec collector python -m collector.scheduler --run data_mos
 # odin servis
 docker compose exec collector python -m collector.scheduler --run data_mos_1498
 
-# drugie zadachi
+# lens + stroymonitoring (kak v 04:00)
+docker compose exec collector python -m collector.scheduler --run lens_pipeline
 docker compose exec collector python -m collector.scheduler --run lens_sync
+docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
 docker compose exec collector python -m collector.scheduler --run genplan
 
 docker compose exec collector python -m collector.scheduler --run-all
@@ -85,7 +87,21 @@ User:     monitor
 Password: monitor
 ```
 
-Skhemy: `data_mos`, `lens`, `genplan`, `collector` (logi zapuskov).
+Skhemy: `data_mos`, `lens`, `stroymonitoring`, `genplan`, `collector` (logi zapuskov).
+
+### Stroymonitoring (web_geo)
+
+Istochnik: `WEB_GEO_DB_*` → `public.boundaries_aip`. Priemnik: `stroymonitoring.boundaries_aip` (polnaya perezagruzka). Konteyner `collector` dolzhen imet dostup k hostu `WEB_GEO_DB_HOST:5432`.
+
+```bash
+# V korne proekta v faile .env (ne tolko .env.example):
+# WEB_GEO_DB_PASSWORD=ваш_пароль
+docker compose up -d collector   # perечitat env posle izmeneniya .env
+
+docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
+# ili oba shaga kak v 04:00:
+docker compose exec collector python -m collector.scheduler --run lens_pipeline
+```
 
 ## Proverka logov zadach
 
@@ -135,6 +151,7 @@ WHERE table_schema = 'data_mos' AND table_name LIKE 'items_%' ORDER BY 1;
 
 SELECT count(*) FROM data_mos.items_1498;
 SELECT count(*) FROM data_mos.items_2855;
+SELECT count(*) FROM stroymonitoring.boundaries_aip;
 ```
 
 Proverte, chto port 5432 nedostupen izvne bez SSH-tunnelya.

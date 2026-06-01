@@ -11,7 +11,7 @@ from typing import Generator, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from collector.config import LOCAL_DB, REMOTE_DB
+from collector.config import LOCAL_DB, REMOTE_DB, WEB_GEO_DB
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,21 @@ def local_connection() -> Generator[psycopg2.extensions.connection, None, None]:
 @contextmanager
 def remote_connection() -> Generator[psycopg2.extensions.connection, None, None]:
     conn = psycopg2.connect(**_conn_params(REMOTE_DB))
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def web_geo_connection() -> Generator[psycopg2.extensions.connection, None, None]:
+    password = WEB_GEO_DB.get("password") or ""
+    if not str(password).strip():
+        raise ValueError(
+            "WEB_GEO_DB_PASSWORD is empty. Set it in the project .env file, then recreate "
+            "the collector container: docker compose up -d collector"
+        )
+    conn = psycopg2.connect(**_conn_params(WEB_GEO_DB))
     try:
         yield conn
     finally:

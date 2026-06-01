@@ -27,6 +27,19 @@ REMOTE_DB = {
     "password": os.getenv("REMOTE_DB_PASSWORD", "qwerty1234"),
 }
 
+WEB_GEO_DB = {
+    "host": os.getenv("WEB_GEO_DB_HOST", "172.21.198.149"),
+    "port": int(os.getenv("WEB_GEO_DB_PORT", "5432")),
+    "dbname": os.getenv("WEB_GEO_DB_NAME", "web_geo"),
+    "user": os.getenv("WEB_GEO_DB_USER", "asidorov"),
+    "password": os.getenv("WEB_GEO_DB_PASSWORD", ""),
+}
+
+STROYMONITORING_REMOTE_SCHEMA = "public"
+STROYMONITORING_REMOTE_TABLE = "boundaries_aip"
+STROYMONITORING_LOCAL_SCHEMA = "stroymonitoring"
+STROYMONITORING_LOCAL_TABLE = "boundaries_aip"
+
 TZ = os.getenv("TZ", "Europe/Moscow")
 
 PurgeRuleKind = Literal["date_on_or_before_month_ago", "year_before_current"]

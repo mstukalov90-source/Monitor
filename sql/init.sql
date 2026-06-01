@@ -2,6 +2,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 
 CREATE SCHEMA IF NOT EXISTS data_mos;
 CREATE SCHEMA IF NOT EXISTS lens;
+CREATE SCHEMA IF NOT EXISTS stroymonitoring;
 CREATE SCHEMA IF NOT EXISTS genplan;
 
 -- data.mos.ru export storage (flattened columns)
