@@ -2,10 +2,7 @@
 Scheduler for MONITOR data collector.
 
 Daily schedule (Europe/Moscow):
-  01:00 — data_mos_2855 export + load
-  01:30 — data_mos_2941 export + load
-  02:00 — data_mos_62461 export + load
-  02:30 — data_mos_62501 export + load
+  03:00 — data_mos (all 8 exports sequentially)
   04:00 — lens sync from remote SPS
   05:00 — genplan response_*.json import
 """
@@ -15,6 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from typing import Callable
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -29,22 +27,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("collector.scheduler")
 
-JOBS = {
-    "data_mos": data_mos_job.run_all_data_mos,
-    "data_mos_2855": data_mos_job.run_2855,
-    "data_mos_2941": data_mos_job.run_2941,
-    "data_mos_62461": data_mos_job.run_62461,
-    "data_mos_62501": data_mos_job.run_62501,
-    "lens_sync": lens_sync_job.run,
-    "genplan": genplan_job.run,
-}
 
-_DATA_MOS_CRON = {
-    2855: (1, 0),
-    2941: (1, 30),
-    62461: (2, 0),
-    62501: (2, 30),
-}
+def _build_jobs() -> dict[str, Callable[[], None]]:
+    jobs: dict[str, Callable[[], None]] = {
+        "data_mos": data_mos_job.run_all_data_mos,
+        "lens_sync": lens_sync_job.run,
+        "genplan": genplan_job.run,
+    }
+    for config in DATA_MOS_EXPORTS:
+        jobs[config.job_name] = lambda c=config: data_mos_job.run_for(c)
+    return jobs
+
+
+JOBS = _build_jobs()
 
 
 def run_job(name: str) -> None:
@@ -57,17 +52,13 @@ def run_job(name: str) -> None:
 def start_scheduler() -> None:
     scheduler = BlockingScheduler(timezone=TZ)
 
-    for config in DATA_MOS_EXPORTS:
-        hour, minute = _DATA_MOS_CRON[config.service_id]
-        scheduler.add_job(
-            data_mos_job.run_for,
-            CronTrigger(hour=hour, minute=minute, timezone=TZ),
-            args=[config],
-            id=config.job_name,
-            name=f"Data MOS export {config.service_id}",
-            replace_existing=True,
-        )
-
+    scheduler.add_job(
+        data_mos_job.run_all_data_mos,
+        CronTrigger(hour=3, minute=0, timezone=TZ),
+        id="data_mos",
+        name="Data MOS export (all services)",
+        replace_existing=True,
+    )
     scheduler.add_job(
         lens_sync_job.run,
         CronTrigger(hour=4, minute=0, timezone=TZ),
@@ -84,9 +75,9 @@ def start_scheduler() -> None:
     )
 
     logger.info("Scheduler started (timezone=%s)", TZ)
+    logger.info("  03:00 — data_mos (%s services)", len(DATA_MOS_EXPORTS))
     for config in DATA_MOS_EXPORTS:
-        hour, minute = _DATA_MOS_CRON[config.service_id]
-        logger.info("  %02d:%02d — %s", hour, minute, config.job_name)
+        logger.info("         — %s", config.job_name)
     logger.info("  04:00 — lens_sync")
     logger.info("  05:00 — genplan")
 

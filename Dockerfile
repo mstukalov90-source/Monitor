@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY collector/ ./collector/
 COPY data_mos_export_2855.py data_mos_export_2941.py \
-     data_mos_export_62461.py data_mos_export_62501.py .
+     data_mos_export_62461.py data_mos_export_62501.py \
+     data_mos_export_1498.py data_mos_export_1500.py \
+     data_mos_export_2386.py data_mos_export_62441.py .
 
 CMD ["python", "-m", "collector.scheduler"]

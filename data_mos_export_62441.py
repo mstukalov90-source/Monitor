@@ -35,10 +35,10 @@ ssl._create_default_https_context = ssl._create_unverified_context
 API_KEY = '66bae17c-d7bd-406c-93f2-649eb6d78c6b'  # Вставьте ваш ключ здесь
 
 # ID сервиса для выгрузки
-SERVICE_ID = 2855
+SERVICE_ID = 62441
 
 # Префикс для выходных файлов
-OUTPUT_PREFIX = "Data_mos_export"
+OUTPUT_PREFIX = "Data_mos_export_62441"
 # ============================================================================
 
 

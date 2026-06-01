@@ -93,11 +93,79 @@ def list_remote_public_tables(conn: psycopg2.extensions.connection) -> list[str]
         return [r[0] for r in cur.fetchall()]
 
 
+def split_sql_statements(sql: str) -> list[str]:
+    """Split SQL into statements, respecting quotes and dollar-quoted bodies."""
+    statements: list[str] = []
+    buf: list[str] = []
+    i = 0
+    length = len(sql)
+    in_single = False
+    dollar_delim: str | None = None
+
+    while i < length:
+        ch = sql[i]
+
+        if dollar_delim is not None:
+            if sql.startswith(dollar_delim, i):
+                buf.append(dollar_delim)
+                i += len(dollar_delim)
+                dollar_delim = None
+            else:
+                buf.append(ch)
+                i += 1
+            continue
+
+        if in_single:
+            buf.append(ch)
+            if ch == "'" and i + 1 < length and sql[i + 1] == "'":
+                buf.append(sql[i + 1])
+                i += 2
+                continue
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+
+        if ch == "-" and i + 1 < length and sql[i + 1] == "-":
+            while i < length and sql[i] != "\n":
+                i += 1
+            continue
+
+        if ch == "'":
+            in_single = True
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == "$":
+            end = sql.find("$", i + 1)
+            if end != -1:
+                dollar_delim = sql[i : end + 1]
+                buf.append(dollar_delim)
+                i = end + 1
+                continue
+
+        if ch == ";":
+            statement = "".join(buf).strip()
+            if statement:
+                statements.append(statement)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    statement = "".join(buf).strip()
+    if statement:
+        statements.append(statement)
+    return statements
+
+
 def execute_sql_file(conn: psycopg2.extensions.connection, path: Path) -> None:
     """Run a SQL script (multiple statements) from a file."""
     sql = path.read_text(encoding="utf-8")
-    sql = re.sub(r"--[^\n]*", "", sql)
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
+    statements = split_sql_statements(sql)
     with conn.cursor() as cur:
         for statement in statements:
             cur.execute(statement)

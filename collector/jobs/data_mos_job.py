@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 
 import geopandas as gpd
 
@@ -23,11 +24,18 @@ from collector.data_mos_schema import (
     extract_feature_properties,
     insert_feature,
 )
+from collector.data_mos_purge import purge_archived
 from collector.db import local_connection, log_job_run
 
 logger = logging.getLogger(__name__)
 
 _TABLE_NAME_RE = re.compile(r"^items_\d+$")
+
+
+@dataclass(frozen=True)
+class LoadResult:
+    loaded: int
+    purged: int
 
 
 def _validate_table_name(table: str) -> str:
@@ -65,7 +73,7 @@ def run_export(config: DataMosExportConfig) -> None:
     logger.info("Export completed successfully for service %s", config.service_id)
 
 
-def load_geojson_to_db(config: DataMosExportConfig) -> int:
+def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
     """Load GeoJSON into data_mos.<table> with dynamic columns from JSON keys."""
     table = _validate_table_name(config.table)
     qualified = f"data_mos.{table}"
@@ -99,7 +107,11 @@ def load_geojson_to_db(config: DataMosExportConfig) -> int:
                 insert_feature(cur, qualified, schema, props, geom_json)
                 count += 1
 
-    return count
+            purged = 0
+            if config.purge_rule is not None:
+                purged = purge_archived(cur, qualified, config.purge_rule)
+
+    return LoadResult(loaded=count, purged=purged)
 
 
 def cleanup_export_files(config: DataMosExportConfig) -> None:
@@ -120,18 +132,18 @@ def run_for(config: DataMosExportConfig) -> None:
 
     try:
         run_export(config)
-        count = load_geojson_to_db(config)
+        result = load_geojson_to_db(config)
         cleanup_export_files(config)
         with local_connection() as conn:
             log_job_run(
                 conn, config.job_name, "success",
-                f"Loaded {count} features into {config.table}",
-                rows_affected=count,
+                f"Loaded {result.loaded} features, purged {result.purged} archived rows",
+                rows_affected=result.loaded,
                 run_id=run_id,
             )
         logger.info(
-            "%s finished: %s rows in data_mos.%s",
-            config.job_name, count, config.table,
+            "%s finished: %s rows loaded, %s archived rows purged in data_mos.%s",
+            config.job_name, result.loaded, result.purged, config.table,
         )
     except Exception as exc:
         logger.exception("%s failed", config.job_name)
@@ -144,22 +156,6 @@ def run_for(config: DataMosExportConfig) -> None:
 
 
 def run_all_data_mos() -> None:
-    """Run all four data.mos.ru export pipelines sequentially."""
+    """Run all data.mos.ru export pipelines sequentially (see DATA_MOS_EXPORTS)."""
     for config in DATA_MOS_EXPORTS:
         run_for(config)
-
-
-def run_2855() -> None:
-    run_for(DATA_MOS_EXPORTS[0])
-
-
-def run_2941() -> None:
-    run_for(DATA_MOS_EXPORTS[1])
-
-
-def run_62461() -> None:
-    run_for(DATA_MOS_EXPORTS[2])
-
-
-def run_62501() -> None:
-    run_for(DATA_MOS_EXPORTS[3])

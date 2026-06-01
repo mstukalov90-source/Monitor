@@ -3,6 +3,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, Optional
 
 from dotenv import load_dotenv
 
@@ -28,6 +29,14 @@ REMOTE_DB = {
 
 TZ = os.getenv("TZ", "Europe/Moscow")
 
+PurgeRuleKind = Literal["date_on_or_before_month_ago", "year_before_current"]
+
+
+@dataclass(frozen=True)
+class DataMosPurgeRule:
+    column: str
+    kind: PurgeRuleKind
+
 
 @dataclass(frozen=True)
 class DataMosExportConfig:
@@ -37,9 +46,13 @@ class DataMosExportConfig:
     gpkg: Path
     table: str
     job_name: str
+    purge_rule: Optional[DataMosPurgeRule] = None
 
 
-def _data_mos_export(service_id: int) -> DataMosExportConfig:
+def _data_mos_export(
+    service_id: int,
+    purge_rule: Optional[DataMosPurgeRule] = None,
+) -> DataMosExportConfig:
     prefix = f"Data_mos_export_{service_id}"
     return DataMosExportConfig(
         service_id=service_id,
@@ -48,14 +61,27 @@ def _data_mos_export(service_id: int) -> DataMosExportConfig:
         gpkg=PROJECT_DIR / f"{prefix}.gpkg",
         table=f"items_{service_id}",
         job_name=f"data_mos_{service_id}",
+        purge_rule=purge_rule,
     )
 
 
+_DATE_PURGE = DataMosPurgeRule("work_end_date", "date_on_or_before_month_ago")
+_ACTUAL_END_DATE_PURGE = DataMosPurgeRule(
+    "actual_end_date", "date_on_or_before_month_ago"
+)
+_YEAR_PURGE = DataMosPurgeRule(
+    "plan_year_construction_complete", "year_before_current"
+)
+
 DATA_MOS_EXPORTS: tuple[DataMosExportConfig, ...] = (
-    _data_mos_export(2855),
-    _data_mos_export(2941),
-    _data_mos_export(62461),
-    _data_mos_export(62501),
+    _data_mos_export(2855, _DATE_PURGE),
+    _data_mos_export(2941, _YEAR_PURGE),
+    _data_mos_export(62461, _DATE_PURGE),
+    _data_mos_export(62501, _DATE_PURGE),
+    _data_mos_export(1498),
+    _data_mos_export(1500),
+    _data_mos_export(2386),
+    _data_mos_export(62441, _ACTUAL_END_DATE_PURGE),
 )
 
 DATA_MOS_EXPORT_BY_JOB: dict[str, DataMosExportConfig] = {
@@ -63,3 +89,4 @@ DATA_MOS_EXPORT_BY_JOB: dict[str, DataMosExportConfig] = {
 }
 
 DATA_MOS_TABLES_SQL = PROJECT_DIR / "sql" / "04_data_mos_dynamic_tables.sql"
+DATA_MOS_PURGE_FUNCTIONS_SQL = PROJECT_DIR / "sql" / "05_data_mos_purge_functions.sql"
