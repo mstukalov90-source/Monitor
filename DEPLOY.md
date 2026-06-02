@@ -89,6 +89,7 @@ ssh -i <path_to_ssh_key> root@<server_ip>
 cd /opt/monitor
 docker cp /tmp/monitor_full.dump monitor-db:/tmp/monitor_full.dump
 docker compose exec -T db pg_restore -U monitor -d monitor --clean --if-exists --no-owner --no-acl /tmp/monitor_full.dump
+docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 ```
 
 Пароль для подключения к БД после восстановления — из `.env` на VPS (`POSTGRES_PASSWORD`). Если при первом запуске контейнера пароль уже был задан, он должен совпадать с тем, что ожидает клиент.
@@ -124,6 +125,7 @@ docker compose logs collector --tail 100
 docker compose exec collector python -m collector.scheduler --run data_mos
 docker compose exec collector python -m collector.scheduler --run lens_pipeline
 docker compose exec collector python -m collector.scheduler --run genplan
+docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 ```
 
 Проверка в БД:
@@ -170,9 +172,10 @@ cd /opt/monitor
 git pull origin main
 docker compose up -d --build
 docker compose ps
+docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 ```
 
-При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/`.
+При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`).
 
 ## Расписание задач
 

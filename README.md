@@ -81,10 +81,11 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Na sushchestvuyushchey BD primenite migratsii (06 — bez DROP, bezopasno):
+Na sushchestvuyushchey BD primenite migratsii (06 i 08 — bez DROP, bezopasno):
 
 ```bash
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
 
@@ -149,6 +150,7 @@ cd /opt/monitor
 cp .env.example .env
 docker compose up -d --build
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 ```
 
 ## SSH tunnel to DB
@@ -164,6 +166,7 @@ cd /opt/monitor
 git pull
 docker compose up -d --build
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/05_data_mos_purge_functions.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
