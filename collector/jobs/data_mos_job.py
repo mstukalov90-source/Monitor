@@ -24,6 +24,7 @@ from collector.data_mos_schema import (
     extract_feature_properties,
     insert_feature,
 )
+from collector.data_mos_line_to_polygon import derive_polygons_from_lines
 from collector.data_mos_purge import purge_archived
 from collector.db import local_connection, log_job_run
 
@@ -36,6 +37,7 @@ _TABLE_NAME_RE = re.compile(r"^items_\d+$")
 class LoadResult:
     loaded: int
     purged: int
+    derived_polygons: int = 0
 
 
 def _validate_table_name(table: str) -> str:
@@ -111,7 +113,9 @@ def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
             if config.purge_rule is not None:
                 purged = purge_archived(cur, qualified, config.purge_rule)
 
-    return LoadResult(loaded=count, purged=purged)
+            derived = derive_polygons_from_lines(cur, qualified)
+
+    return LoadResult(loaded=count, purged=purged, derived_polygons=derived)
 
 
 def cleanup_export_files(config: DataMosExportConfig) -> None:
@@ -137,13 +141,18 @@ def run_for(config: DataMosExportConfig) -> None:
         with local_connection() as conn:
             log_job_run(
                 conn, config.job_name, "success",
-                f"Loaded {result.loaded} features, purged {result.purged} archived rows",
+                (
+                    f"Loaded {result.loaded} features, purged {result.purged} archived rows, "
+                    f"derived {result.derived_polygons} polygons"
+                ),
                 rows_affected=result.loaded,
                 run_id=run_id,
             )
         logger.info(
-            "%s finished: %s rows loaded, %s archived rows purged in data_mos.%s",
-            config.job_name, result.loaded, result.purged, config.table,
+            "%s finished: %s rows loaded, %s archived rows purged, "
+            "%s derived polygons in data_mos.%s",
+            config.job_name, result.loaded, result.purged,
+            result.derived_polygons, config.table,
         )
     except Exception as exc:
         logger.exception("%s failed", config.job_name)

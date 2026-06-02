@@ -43,6 +43,37 @@ Dlya vybrannykh servisov. Posle uspeshnoy zagruzki udalyayutsya ustarevshie stro
 docker compose exec -T db psql -U monitor -d monitor < sql/05_data_mos_purge_functions.sql
 ```
 
+## Preobrazovanie liniy v poligony (derived polygons)
+
+Posle kazhdoy zagruzki servisov **2855**, **62461**, **62501** collector avtomaticheski obrabatyvaet stroki s `LineString` / `MultiLineString`:
+
+- esli liniya zamknutaya **ili** rasstoyanie mezhdu nachalom i kontsom &lt; 10% ot geodezicheskoy dliny — stroitsya poligon;
+- dlya `MultiLineString` proveryaetsya razryv mezhdu nachalom pervoy i kontsom posledney linii otnositelno summarnoy dliny;
+- iskhodnye linii ostayutsya v tablitse, poligony dobavlyayutsya **novymi strokami** s temi zhe atributami;
+- u proizvodnykh strok zapolneno pole `derived_from_id` (ssylka na `id` roditelskoy linii).
+
+PostGIS-funktsiya dlya ruchnykh zaprosov:
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/07_line_to_polygon.sql
+```
+
+Proverka:
+
+```sql
+SELECT ST_GeometryType(geom), count(*)
+FROM data_mos.items_2855
+WHERE geom IS NOT NULL
+GROUP BY 1;
+
+SELECT count(*) FROM data_mos.items_2855 WHERE derived_from_id IS NOT NULL;
+
+SELECT p.id, p.derived_from_id, ST_GeometryType(l.geom), ST_GeometryType(p.geom)
+FROM data_mos.items_2855 p
+JOIN data_mos.items_2855 l ON l.id = p.derived_from_id
+LIMIT 5;
+```
+
 ## Bystryy start
 
 ```bash
