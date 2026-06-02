@@ -23,6 +23,7 @@ from collector.jobs import (
     genplan_job,
     lens_sync_job,
     stroymonitoring_sync_job,
+    vector_stroy_job,
 )
 
 logging.basicConfig(
@@ -46,6 +47,7 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "lens_sync": lens_sync_job.run,
         "stroymonitoring_sync": stroymonitoring_sync_job.run,
         "genplan": genplan_job.run,
+        "vector_stroy_url_222": vector_stroy_job.run,
     }
     for config in DATA_MOS_EXPORTS:
         jobs[config.job_name] = lambda c=config: data_mos_job.run_for(c)
@@ -59,6 +61,7 @@ RUN_ALL_ORDER: tuple[str, ...] = (
     "data_mos",
     "lens_pipeline",
     "genplan",
+    "vector_stroy_url_222",
 )
 
 
@@ -93,6 +96,13 @@ def start_scheduler() -> None:
         name="Genplan response JSON import",
         replace_existing=True,
     )
+    scheduler.add_job(
+        vector_stroy_job.run,
+        CronTrigger(hour=6, minute=0, timezone=TZ),
+        id="vector_stroy_url_222",
+        name="Vector stroy url_222 GeoJSON upsert",
+        replace_existing=True,
+    )
 
     logger.info("Scheduler started (timezone=%s)", TZ)
     logger.info("  03:00 — data_mos (%s services)", len(DATA_MOS_EXPORTS))
@@ -100,6 +110,7 @@ def start_scheduler() -> None:
         logger.info("         — %s", config.job_name)
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  05:00 — genplan")
+    logger.info("  06:00 — vector_stroy_url_222")
 
     try:
         scheduler.start()

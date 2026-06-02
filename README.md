@@ -9,6 +9,7 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 | 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` podryad → `data_mos.items_<id>` |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
 | 05:00 | `genplan` | Import `response_*.json` v `genplan.responses`, udalenie obrabotannykh faylov |
+| 06:00 | `vector_stroy_url_222` | Upsert `url_222_wgs.geojson` v `vector_stroy.url_222` po `uuid`, zatem udalenie fayla |
 
 Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
 
@@ -105,6 +106,7 @@ docker compose exec collector python -m collector.scheduler --run lens_pipeline
 docker compose exec collector python -m collector.scheduler --run lens_sync
 docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
 docker compose exec collector python -m collector.scheduler --run genplan
+docker compose exec collector python -m collector.scheduler --run vector_stroy_url_222
 
 docker compose exec collector python -m collector.scheduler --run-all
 ```
