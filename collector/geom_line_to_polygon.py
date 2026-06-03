@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Iterator, Optional
 
 from pyproj import Geod
-from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, Polygon
+from shapely.geometry import (
+    GeometryCollection,
+    LineString,
+    MultiLineString,
+    MultiPolygon,
+    Point,
+    Polygon,
+)
 from shapely.geometry.base import BaseGeometry
 from shapely.validation import make_valid
 
@@ -136,6 +143,30 @@ def _multilinestring_to_polygon(mls: MultiLineString, threshold: float) -> Optio
     if _unique_vertex_count(list(ring.coords)) < 3:
         return None
     return _ring_to_polygon(ring)
+
+
+def iter_geometry_collection_parts(geom: BaseGeometry) -> Iterator[BaseGeometry]:
+    """Yield leaf geometries from a (possibly nested) GeometryCollection."""
+    if geom is None or geom.is_empty:
+        return
+    if isinstance(geom, GeometryCollection):
+        for part in geom.geoms:
+            yield from iter_geometry_collection_parts(part)
+    else:
+        yield geom
+
+
+def iter_line_parts(geom: BaseGeometry) -> Iterator[LineString | MultiLineString]:
+    """Yield LineString / MultiLineString parts from any geometry tree."""
+    if geom is None or geom.is_empty:
+        return
+    if isinstance(geom, GeometryCollection):
+        for part in geom.geoms:
+            yield from iter_line_parts(part)
+    elif isinstance(geom, LineString):
+        yield geom
+    elif isinstance(geom, MultiLineString):
+        yield geom
 
 
 def try_line_to_polygon(geom: BaseGeometry, threshold: float = 0.1) -> Optional[Polygon]:

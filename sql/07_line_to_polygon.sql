@@ -14,7 +14,7 @@ AS $$
             (d).path[1] AS line_idx,
             (dp).path[1] AS pt_idx,
             (dp).geom AS pts
-        FROM ST_Dump(geom) AS d(line_path, line_geom),
+        FROM ST_Dump(geom) AS d,
              LATERAL ST_DumpPoints((d).geom) AS dp
     ) ordered;
 $$;

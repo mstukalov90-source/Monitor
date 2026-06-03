@@ -16,6 +16,8 @@ services:
       - ./sql/04_data_mos_dynamic_tables.sql:/docker-entrypoint-initdb.d/02-data-mos-dynamic-tables.sql:ro
       - ./sql/05_data_mos_purge_functions.sql:/docker-entrypoint-initdb.d/03-data-mos-purge-functions.sql:ro
       - ./sql/06_data_mos_extra_tables.sql:/docker-entrypoint-initdb.d/04-data-mos-extra-tables.sql:ro
+      - ./sql/07_line_to_polygon.sql:/docker-entrypoint-initdb.d/05-line-to-polygon.sql:ro
+      - ./sql/09_data_mos_geom_split.sql:/docker-entrypoint-initdb.d/06-data-mos-geom-split.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s

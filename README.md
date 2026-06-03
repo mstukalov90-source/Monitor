@@ -9,7 +9,7 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 | 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` podryad → `data_mos.items_<id>` |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
 | 05:00 | `genplan` | Import `response_*.json` v `genplan.responses`, udalenie obrabotannykh faylov |
-| 06:00 | `vector_stroy_url_222` | Upsert `url_222_wgs.geojson` v `vector_stroy.url_222` po `uuid`, zatem udalenie fayla |
+| 06:00 | `vector_stroy_url_222` | Esli v korne proekta est `url_222_wgs.geojson` — upsert v `vector_stroy.url_222` po `uuid`, zatem udalenie fayla; inache propusk |
 
 Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
 
@@ -44,34 +44,54 @@ Dlya vybrannykh servisov. Posle uspeshnoy zagruzki udalyayutsya ustarevshie stro
 docker compose exec -T db psql -U monitor -d monitor < sql/05_data_mos_purge_functions.sql
 ```
 
-## Preobrazovanie liniy v poligony (derived polygons)
+## Pайплайн data_mos (2855, 62441, 62461, 62501)
 
-Posle kazhdoy zagruzki servisov **2855**, **62461**, **62501** collector avtomaticheski obrabatyvaet stroki s `LineString` / `MultiLineString`:
+Dlya kazhdogo servisa posledovatelno:
 
-- esli liniya zamknutaya **ili** rasstoyanie mezhdu nachalom i kontsom &lt; 10% ot geodezicheskoy dliny — stroitsya poligon;
-- dlya `MultiLineString` proveryaetsya razryv mezhdu nachalom pervoy i kontsom posledney linii otnositelno summarnoy dliny;
-- iskhodnye linii ostayutsya v tablitse, poligony dobavlyayutsya **novymi strokami** s temi zhe atributami;
-- u proizvodnykh strok zapolneno pole `derived_from_id` (ssylka na `id` roditelskoy linii).
+1. `data_mos_export_<id>.py` → GeoJSON
+2. Zagruzka v `data_mos.items_<id>`
+3. `purge_archived` po date
+4. `derive_polygons_from_lines` (Python) — line→polygon dlya `LineString` / `MultiLineString` i dlya liniy vnutri `GeometryCollection` → novye stroki v `items_*` s `derived_from_id`
+5. `rebuild_geom_split` — marshrutizatsiya v `*_points`, `*_lines`, `*_polygons` (`ST_MakeValid`, `ST_Dump` dlya chastey `GeometryCollection`; bez povtornogo line→polygon)
 
-PostGIS-funktsiya dlya ruchnykh zaprosov:
+| Ishod | Naznachenie |
+|-------|-------------|
+| `data_mos.items_2855` | `items_2855_points`, `items_2855_lines`, `items_2855_polygons` |
+| `data_mos.items_62441` | `items_62441_points`, `items_62441_lines`, `items_62441_polygons` |
+| `data_mos.items_62461` | `items_62461_points`, `items_62461_lines`, `items_62461_polygons` |
+| `data_mos.items_62501` | `items_62501_points`, `items_62501_lines`, `items_62501_polygons` |
+
+Polya v tipizirovannykh tablitsakh: `source_id`, v `*_polygons` takzhe `derived_from_id` (kopiya iz `items_*`).
+
+Migratsiya obolochek tablits:
 
 ```bash
-docker compose exec -T db psql -U monitor -d monitor < sql/07_line_to_polygon.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/09_data_mos_geom_split.sql
 ```
+
+`sql/07_line_to_polygon.sql` — tolko dlya ruchnykh SQL-zaprosov v psql, ne dlya ETL.
 
 Proverka:
 
 ```sql
 SELECT ST_GeometryType(geom), count(*)
-FROM data_mos.items_2855
-WHERE geom IS NOT NULL
+FROM data_mos.items_2855_points
 GROUP BY 1;
 
-SELECT count(*) FROM data_mos.items_2855 WHERE derived_from_id IS NOT NULL;
+SELECT count(*) FROM data_mos.items_2855_lines;
+SELECT count(*) FROM data_mos.items_2855_polygons WHERE derived_from_id IS NOT NULL;
 
-SELECT p.id, p.derived_from_id, ST_GeometryType(l.geom), ST_GeometryType(p.geom)
-FROM data_mos.items_2855 p
-JOIN data_mos.items_2855 l ON l.id = p.derived_from_id
+SELECT count(*) FROM data_mos.items_2855
+WHERE ST_GeometryType(geom) = 'ST_GeometryCollection';
+
+SELECT count(*) FROM data_mos.items_2855_points p
+JOIN data_mos.items_2855 s ON s.id = p.source_id
+WHERE ST_GeometryType(s.geom) = 'ST_GeometryCollection';
+
+SELECT p.source_id, p.derived_from_id, ST_GeometryType(l.geom), ST_GeometryType(p.geom)
+FROM data_mos.items_2855_polygons p
+JOIN data_mos.items_2855_lines l ON l.source_id = p.derived_from_id
+WHERE p.derived_from_id IS NOT NULL
 LIMIT 5;
 ```
 
@@ -82,11 +102,12 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Na sushchestvuyushchey BD primenite migratsii (06 i 08 — bez DROP, bezopasno):
+Na sushchestvuyushchey BD primenite migratsii (06, 08, 09 — bez DROP, bezopasno):
 
 ```bash
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/09_data_mos_geom_split.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
 

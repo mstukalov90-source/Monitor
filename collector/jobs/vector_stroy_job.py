@@ -137,8 +137,26 @@ def run() -> None:
             conn,
             JOB_NAME,
             "running",
-            f"Started loading {SOURCE_GEOJSON.name} into {QUALIFIED_TABLE}",
+            f"Source file: {SOURCE_GEOJSON.name}",
         )
+
+    if not SOURCE_GEOJSON.exists():
+        with local_connection() as conn:
+            log_job_run(
+                conn,
+                JOB_NAME,
+                "success",
+                f"No file to process: {SOURCE_GEOJSON.name}",
+                rows_affected=0,
+                run_id=run_id,
+            )
+        logger.info(
+            "%s: %s not found in %s, skipping",
+            JOB_NAME,
+            SOURCE_GEOJSON.name,
+            PROJECT_DIR,
+        )
+        return
 
     try:
         result = load_geojson_to_db()
