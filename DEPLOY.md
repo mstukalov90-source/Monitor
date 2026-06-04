@@ -173,9 +173,10 @@ git pull origin main
 docker compose up -d --build
 docker compose ps
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
 ```
 
-При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`).
+При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`, `sql/10_genplan_multi_tables.sql`).
 
 ## Расписание задач
 
@@ -183,6 +184,6 @@ docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 |-------------|--------|----------|
 | 03:00 | `data_mos` | 8 экспортов data.mos.ru |
 | 04:00 | `lens_pipeline` | `lens_sync` + `stroymonitoring_sync` |
-| 05:00 | `genplan` | импорт `response_*.json` из корня проекта |
+| 05:00 | `genplan` | импорт `jsons_genplan/*.json` в `genplan.order`, `photo_meta`, `upload`, `uuid_area` (тип по структуре JSON) |
 
 Подробнее о сервисах и таблицах — в [README.md](README.md).

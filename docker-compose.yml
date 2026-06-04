@@ -18,6 +18,9 @@ services:
       - ./sql/06_data_mos_extra_tables.sql:/docker-entrypoint-initdb.d/04-data-mos-extra-tables.sql:ro
       - ./sql/07_line_to_polygon.sql:/docker-entrypoint-initdb.d/05-line-to-polygon.sql:ro
       - ./sql/09_data_mos_geom_split.sql:/docker-entrypoint-initdb.d/06-data-mos-geom-split.sql:ro
+      - ./sql/11_odh_export_ogh_disruption.sql:/docker-entrypoint-initdb.d/07-odh-export-ogh-disruption.sql:ro
+      - ./sql/12_odh_export_ogh_disruption_coords.sql:/docker-entrypoint-initdb.d/08-odh-export-ogh-disruption-coords.sql:ro
+      - ./sql/13_odh_export_move_schema.sql:/docker-entrypoint-initdb.d/09-odh-export-move-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s

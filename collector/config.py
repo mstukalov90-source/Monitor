@@ -11,6 +11,16 @@ load_dotenv()
 
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/app"))
 
+OGH_DISRUPTION_GEOJSON = PROJECT_DIR / "mggt_dgn" / "mggt_dgn.geojson"
+
+GENPLAN_JSON_DIR = PROJECT_DIR / "jsons_genplan"
+GENPLAN_SAMPLE_FILES = frozenset({
+    "order.json",
+    "photo_meta.json",
+    "upload.json",
+    "uuid_area.json",
+})
+
 LOCAL_DB = {
     "host": os.getenv("LOCAL_DB_HOST", "localhost"),
     "port": int(os.getenv("LOCAL_DB_PORT", "5432")),

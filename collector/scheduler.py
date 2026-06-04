@@ -2,9 +2,9 @@
 Scheduler for MONITOR data collector.
 
 Daily schedule (Europe/Moscow):
-  03:00 — data_mos (all 8 exports sequentially)
+  03:00 — data_mos (all 8 exports sequentially), then ogh_disruption if mggt_dgn.geojson exists
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
-  05:00 — genplan response_*.json import
+  05:00 — genplan jsons_genplan/*.json import
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from collector.jobs import (
     data_mos_job,
     genplan_job,
     lens_sync_job,
+    ogh_disruption_job,
     stroymonitoring_sync_job,
     vector_stroy_job,
 )
@@ -43,6 +44,7 @@ def run_lens_pipeline() -> None:
 def _build_jobs() -> dict[str, Callable[[], None]]:
     jobs: dict[str, Callable[[], None]] = {
         "data_mos": data_mos_job.run_all_data_mos,
+        "ogh_disruption": ogh_disruption_job.run,
         "lens_pipeline": run_lens_pipeline,
         "lens_sync": lens_sync_job.run,
         "stroymonitoring_sync": stroymonitoring_sync_job.run,
@@ -59,6 +61,7 @@ JOBS = _build_jobs()
 # Order for --run-all (no duplicate lens / stroymonitoring entries).
 RUN_ALL_ORDER: tuple[str, ...] = (
     "data_mos",
+    "ogh_disruption",
     "lens_pipeline",
     "genplan",
     "vector_stroy_url_222",
@@ -105,9 +108,10 @@ def start_scheduler() -> None:
     )
 
     logger.info("Scheduler started (timezone=%s)", TZ)
-    logger.info("  03:00 — data_mos (%s services)", len(DATA_MOS_EXPORTS))
+    logger.info("  03:00 — data_mos (%s services), then ogh_disruption", len(DATA_MOS_EXPORTS))
     for config in DATA_MOS_EXPORTS:
         logger.info("         — %s", config.job_name)
+    logger.info("         — ogh_disruption (mggt_dgn/mggt_dgn.geojson, if present)")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  05:00 — genplan")
     logger.info("  06:00 — vector_stroy_url_222")

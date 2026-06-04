@@ -4,6 +4,9 @@ CREATE SCHEMA IF NOT EXISTS data_mos;
 CREATE SCHEMA IF NOT EXISTS lens;
 CREATE SCHEMA IF NOT EXISTS stroymonitoring;
 CREATE SCHEMA IF NOT EXISTS genplan;
+CREATE SCHEMA IF NOT EXISTS odh_export;
+
+-- ogh-disruption table shell: sql/11_odh_export_ogh_disruption.sql (mounted in docker-compose initdb)
 
 -- data.mos.ru export storage (flattened columns)
 CREATE TABLE IF NOT EXISTS data_mos.items (
@@ -43,39 +46,61 @@ CREATE INDEX IF NOT EXISTS idx_data_mos_items_loaded_at
 
 -- Per-service tables: sql/04_data_mos_dynamic_tables.sql (mounted in docker-compose initdb)
 
--- genplan response_*.json storage (flattened columns)
-CREATE TABLE IF NOT EXISTS genplan.responses (
-    id                  BIGSERIAL PRIMARY KEY,
-    file_name           TEXT NOT NULL,
-    opening             BOOLEAN,
-    legal               BOOLEAN,
-    description         TEXT,
-    image               TEXT,
-    photo_lat           DOUBLE PRECISION,
-    photo_lng           DOUBLE PRECISION,
-    photo_azimuth_deg   INTEGER,
-    order_source        TEXT,
-    order_doc_num       TEXT,
-    order_work_types    TEXT,
-    order_date_start    DATE,
-    order_date_end      DATE,
-    order_customer      TEXT,
-    order_status        TEXT,
-    yolo_label          INTEGER,
-    yolo_votes          JSONB,
-    geom                GEOMETRY(Geometry, 4326),
-    photo_geom          GEOMETRY(Point, 4326),
-    loaded_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- genplan jsons_genplan/*.json — shells; dynamic columns added by genplan_job
+-- Full migration for existing DBs: sql/10_genplan_multi_tables.sql
+
+CREATE TABLE IF NOT EXISTS genplan."order" (
+    id          BIGSERIAL PRIMARY KEY,
+    file_name   TEXT NOT NULL,
+    geom        GEOMETRY(Geometry, 4326),
+    loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_genplan_responses_geom
-    ON genplan.responses USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_genplan_responses_photo_geom
-    ON genplan.responses USING GIST (photo_geom);
-CREATE INDEX IF NOT EXISTS idx_genplan_responses_file_name
-    ON genplan.responses (file_name);
-CREATE INDEX IF NOT EXISTS idx_genplan_responses_loaded_at
-    ON genplan.responses (loaded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_genplan_order_geom
+    ON genplan."order" USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_genplan_order_file_name
+    ON genplan."order" (file_name);
+CREATE INDEX IF NOT EXISTS idx_genplan_order_loaded_at
+    ON genplan."order" (loaded_at DESC);
+
+CREATE TABLE IF NOT EXISTS genplan.photo_meta (
+    id          BIGSERIAL PRIMARY KEY,
+    file_name   TEXT NOT NULL,
+    geom        GEOMETRY(Point, 4326),
+    loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_genplan_photo_meta_geom
+    ON genplan.photo_meta USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_genplan_photo_meta_file_name
+    ON genplan.photo_meta (file_name);
+CREATE INDEX IF NOT EXISTS idx_genplan_photo_meta_loaded_at
+    ON genplan.photo_meta (loaded_at DESC);
+
+CREATE TABLE IF NOT EXISTS genplan.upload (
+    id          BIGSERIAL PRIMARY KEY,
+    file_name   TEXT NOT NULL,
+    loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_genplan_upload_file_name
+    ON genplan.upload (file_name);
+CREATE INDEX IF NOT EXISTS idx_genplan_upload_loaded_at
+    ON genplan.upload (loaded_at DESC);
+
+CREATE TABLE IF NOT EXISTS genplan.uuid_area (
+    id          BIGSERIAL PRIMARY KEY,
+    file_name   TEXT NOT NULL,
+    uuid        TEXT,
+    loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_genplan_uuid_area_uuid
+    ON genplan.uuid_area (uuid);
+CREATE INDEX IF NOT EXISTS idx_genplan_uuid_area_file_name
+    ON genplan.uuid_area (file_name);
+CREATE INDEX IF NOT EXISTS idx_genplan_uuid_area_loaded_at
+    ON genplan.uuid_area (loaded_at DESC);
 
 -- lens schema tables are created dynamically by lens_sync_job
 

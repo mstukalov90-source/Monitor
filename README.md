@@ -6,9 +6,9 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 
 | Vremya | Zadacha | Opisanie |
 |-------|--------|----------|
-| 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` podryad → `data_mos.items_<id>` |
+| 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
-| 05:00 | `genplan` | Import `response_*.json` v `genplan.responses`, udalenie obrabotannykh faylov |
+| 05:00 | `genplan` | Import `jsons_genplan/*.json` v 4 tablitsy `genplan.*` (klassifikatsiya po strukture JSON), udalenie obrabotannykh faylov |
 | 06:00 | `vector_stroy_url_222` | Esli v korne proekta est `url_222_wgs.geojson` — upsert v `vector_stroy.url_222` po `uuid`, zatem udalenie fayla; inache propusk |
 
 Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
@@ -102,12 +102,13 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Na sushchestvuyushchey BD primenite migratsii (06, 08, 09 — bez DROP, bezopasno):
+Na sushchestvuyushchey BD primenite migratsii (06, 08, 09 — bez DROP, bezopasno; 10 — DROP `genplan.responses`):
 
 ```bash
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/09_data_mos_geom_split.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
 
@@ -127,6 +128,7 @@ docker compose exec collector python -m collector.scheduler --run lens_pipeline
 docker compose exec collector python -m collector.scheduler --run lens_sync
 docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
 docker compose exec collector python -m collector.scheduler --run genplan
+docker compose exec collector python -m collector.scheduler --run ogh_disruption
 docker compose exec collector python -m collector.scheduler --run vector_stroy_url_222
 
 docker compose exec collector python -m collector.scheduler --run-all
@@ -174,7 +176,21 @@ cp .env.example .env
 docker compose up -d --build
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
 ```
+
+## Genplan (`jsons_genplan/`)
+
+JSON-fayly v papke `jsons_genplan/` (v korne proekta, v Docker — `/app/jsons_genplan`). Tip opredelyaetsya po strukture, ne po imeni fayla:
+
+| Struktura | Tablitsa | Geometriya |
+|-----------|----------|------------|
+| est `wkt` | `genplan.order` | `geom` iz WKT |
+| est `lat` i `lng` | `genplan.photo_meta` | `geom` = tochka; `lat`/`lng` v kolonkakh |
+| est `uuids` (massiv) | `genplan.uuid_area` | odna stroka na kazhdyy uuid |
+| bez koordinat | `genplan.upload` | bez `geom` |
+
+Ostalnye klyuchi JSON → dinamicheskie kolonki (snake_case). Obraztsy `order.json`, `photo_meta.json`, `upload.json`, `uuid_area.json` posle importa ne udalyayutsya.
 
 ## SSH tunnel to DB
 

@@ -1,4 +1,4 @@
-"""05:00 job — import response_*.json files into genplan.responses."""
+"""05:00 job — import jsons_genplan/*.json into typed genplan tables."""
 
 from __future__ import annotations
 
@@ -6,112 +6,170 @@ import json
 import logging
 from pathlib import Path
 
-from psycopg2.extras import Json
-
-from collector.config import PROJECT_DIR
+from collector.config import GENPLAN_JSON_DIR, GENPLAN_SAMPLE_FILES
 from collector.db import local_connection, log_job_run
-from collector.flatten import (
-    flatten_genplan_payload,
-    order_coord_geojson,
-    photo_point_geojson,
+from collector.genplan_detect import classify_genplan_payload
+from collector.genplan_schema import (
+    collect_schema_from_properties,
+    ensure_columns,
+    ensure_genplan_table,
+    extract_genplan_properties,
+    insert_genplan_row,
+    merge_schema,
+    qualified_table,
 )
 
 logger = logging.getLogger(__name__)
 
 JOB_NAME = "genplan"
 
-GENPLAN_COLUMNS = [
-    "file_name", "opening", "legal", "description", "image",
-    "photo_lat", "photo_lng", "photo_azimuth_deg",
-    "order_source", "order_doc_num", "order_work_types",
-    "order_date_start", "order_date_end", "order_customer", "order_status",
-    "yolo_label", "yolo_votes",
-]
+
+def _parse_lat_lng(payload: dict) -> tuple[float, float] | None:
+    try:
+        lat = float(payload["lat"])
+        lng = float(payload["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return lat, lng
 
 
-def process_file(file_path: Path) -> None:
+def process_file(file_path: Path) -> int:
+    """Import one JSON file; return number of rows inserted."""
     with open(file_path, encoding="utf-8") as f:
         payload = json.load(f)
 
-    flat = flatten_genplan_payload(payload, file_path.name)
-    values = dict(flat)
-    if values.get("yolo_votes") is not None:
-        values["yolo_votes"] = Json(values["yolo_votes"])
+    kind = classify_genplan_payload(payload)
+    if kind is None:
+        raise ValueError(f"Unrecognized JSON structure: {file_path.name}")
 
-    geom_json = order_coord_geojson(payload)
-    photo_json = photo_point_geojson(payload)
-
-    col_list = ", ".join(GENPLAN_COLUMNS)
-    placeholders = ", ".join(f"%({c})s" for c in GENPLAN_COLUMNS)
-
-    extra_cols = []
-    extra_vals = []
-    params = dict(values)
-
-    if geom_json:
-        extra_cols.append("geom")
-        extra_vals.append("ST_SetSRID(ST_GeomFromGeoJSON(%(geom)s), 4326)")
-        params["geom"] = geom_json
-    if photo_json:
-        extra_cols.append("photo_geom")
-        extra_vals.append("ST_SetSRID(ST_GeomFromGeoJSON(%(photo_geom)s), 4326)")
-        params["photo_geom"] = photo_json
-
-    all_cols = col_list
-    all_placeholders = placeholders
-    if extra_cols:
-        all_cols += ", " + ", ".join(extra_cols)
-        all_placeholders += ", " + ", ".join(extra_vals)
+    file_name = file_path.name
+    rows = 0
 
     with local_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"INSERT INTO genplan.responses ({all_cols}) VALUES ({all_placeholders})",
-                params,
+            ensure_genplan_table(cur, kind)
+
+            if kind == "uuid_area":
+                uuids = payload.get("uuids") or []
+                if not isinstance(uuids, list):
+                    raise ValueError(f"uuids must be a list: {file_path.name}")
+
+                schema: dict[str, str] = {}
+                row_props: list[dict] = []
+                for item in uuids:
+                    props = extract_genplan_properties(
+                        payload, kind=kind, extra={"uuid": item}
+                    )
+                    schema = merge_schema(schema, props)
+                    row_props.append(props)
+
+                ensure_columns(cur, qualified_table(kind), schema)
+                for props in row_props:
+                    insert_genplan_row(cur, kind, schema, file_name, props)
+                    rows += 1
+                return rows
+
+            props = extract_genplan_properties(payload, kind=kind)
+            schema = collect_schema_from_properties(props)
+            ensure_columns(cur, qualified_table(kind), schema)
+
+            wkt: str | None = None
+            lat: float | None = None
+            lng: float | None = None
+
+            if kind == "order":
+                wkt_val = payload.get("wkt")
+                if not isinstance(wkt_val, str) or not wkt_val.strip():
+                    raise ValueError(f"Missing wkt: {file_path.name}")
+                wkt = wkt_val.strip()
+            elif kind == "photo_meta":
+                coords = _parse_lat_lng(payload)
+                if coords is None:
+                    raise ValueError(f"Invalid lat/lng: {file_path.name}")
+                lat, lng = coords
+
+            insert_genplan_row(
+                cur,
+                kind,
+                schema,
+                file_name,
+                props,
+                wkt=wkt,
+                lat=lat,
+                lng=lng,
             )
+            rows = 1
+
+    return rows
 
 
 def run() -> None:
     run_id = None
-    files = sorted(PROJECT_DIR.glob("response_*.json"))
+    genplan_dir = GENPLAN_JSON_DIR
+    if not genplan_dir.is_dir():
+        genplan_dir.mkdir(parents=True, exist_ok=True)
+
+    files = sorted(genplan_dir.glob("*.json"))
 
     with local_connection() as conn:
         run_id = log_job_run(
             conn, JOB_NAME, "running",
-            f"Found {len(files)} response file(s)",
+            f"Found {len(files)} JSON file(s) in {genplan_dir.name}",
         )
 
     if not files:
         with local_connection() as conn:
             log_job_run(
                 conn, JOB_NAME, "success",
-                "No response_*.json files to process",
+                f"No JSON files in {genplan_dir.name}",
                 rows_affected=0,
                 run_id=run_id,
             )
         logger.info("genplan job: no files to process")
         return
 
-    processed = 0
-    try:
-        for file_path in files:
+    processed_files = 0
+    total_rows = 0
+    errors: list[str] = []
+
+    for file_path in files:
+        try:
             logger.info("Processing %s", file_path.name)
-            process_file(file_path)
-            file_path.unlink()
-            logger.info("Imported and deleted %s", file_path.name)
-            processed += 1
+            row_count = process_file(file_path)
+            total_rows += row_count
+            processed_files += 1
 
-        with local_connection() as conn:
-            log_job_run(
-                conn, JOB_NAME, "success",
-                f"Processed {processed} file(s)",
-                rows_affected=processed,
-                run_id=run_id,
-            )
-        logger.info("genplan job finished: %s file(s)", processed)
+            if file_path.name not in GENPLAN_SAMPLE_FILES:
+                file_path.unlink()
+                logger.info("Imported and deleted %s (%s row(s))", file_path.name, row_count)
+            else:
+                logger.info(
+                    "Imported %s (%s row(s)); sample file kept",
+                    file_path.name,
+                    row_count,
+                )
+        except Exception as exc:
+            logger.warning("Skipped %s: %s", file_path.name, exc)
+            errors.append(f"{file_path.name}: {exc}")
 
-    except Exception as exc:
-        logger.exception("genplan job failed")
-        with local_connection() as conn:
-            log_job_run(conn, JOB_NAME, "failed", str(exc), run_id=run_id)
-        raise
+    job_status = "failed" if errors and not processed_files else "success"
+    message_parts = [f"Processed {processed_files} file(s), {total_rows} row(s)"]
+    if errors:
+        message_parts.append(f"{len(errors)} error(s): " + "; ".join(errors[:5]))
+        if len(errors) > 5:
+            message_parts.append("...")
+
+    with local_connection() as conn:
+        log_job_run(
+            conn,
+            JOB_NAME,
+            job_status,
+            "; ".join(message_parts),
+            rows_affected=total_rows,
+            run_id=run_id,
+        )
+
+    if errors and not processed_files:
+        raise RuntimeError("; ".join(errors))
+
+    logger.info("genplan job finished: %s file(s), %s row(s)", processed_files, total_rows)

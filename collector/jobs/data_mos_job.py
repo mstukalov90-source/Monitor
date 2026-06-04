@@ -28,6 +28,7 @@ from collector.data_mos_geom_split import GeomSplitResult, rebuild_geom_split
 from collector.data_mos_line_to_polygon import derive_polygons_from_lines
 from collector.data_mos_purge import purge_archived
 from collector.db import local_connection, log_job_run
+from collector.jobs import ogh_disruption_job
 
 logger = logging.getLogger(__name__)
 
@@ -183,3 +184,4 @@ def run_all_data_mos() -> None:
     """Run all data.mos.ru export pipelines sequentially (see DATA_MOS_EXPORTS)."""
     for config in DATA_MOS_EXPORTS:
         run_for(config)
+    ogh_disruption_job.run()
