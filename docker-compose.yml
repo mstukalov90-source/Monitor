@@ -21,6 +21,7 @@ services:
       - ./sql/11_odh_export_ogh_disruption.sql:/docker-entrypoint-initdb.d/07-odh-export-ogh-disruption.sql:ro
       - ./sql/12_odh_export_ogh_disruption_coords.sql:/docker-entrypoint-initdb.d/08-odh-export-ogh-disruption-coords.sql:ro
       - ./sql/13_odh_export_move_schema.sql:/docker-entrypoint-initdb.d/09-odh-export-move-schema.sql:ro
+      - ./sql/14_lens_stroymonitoring_purge_functions.sql:/docker-entrypoint-initdb.d/10-lens-stroymonitoring-purge-functions.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s

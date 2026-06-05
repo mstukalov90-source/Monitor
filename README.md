@@ -40,8 +40,47 @@ Dlya vybrannykh servisov. Posle uspeshnoy zagruzki udalyayutsya ustarevshie stro
 | `items_62501` | `work_end_date` | kak u 2855 |
 | `items_62441` | `actual_end_date` | data <= segodnya minus 1 mesyats |
 
+### lens i stroymonitoring (OR-usloviya)
+
+Posle uspeshnoy sinhronizatsii v 04:00. Usloviya v ramkah tablitsy obedineny cherez **OR** — stroka udalyaetsya, esli podkhodit khotya by pod odno. Podschety po kazhdomu usloviyu v logakh mogut perekryvat'sya.
+
+| Tablitsa | Usloviya (OR) | Kogda vyzyvaetsya |
+|----------|---------------|-------------------|
+| `stroymonitoring.boundaries_aip` | `status` = «Введён» (ili «Введен»); `status` = «Работы не начаты»; `fno_level1_name` = «Метро»; `actual_object` = false | posle `stroymonitoring_sync` |
+| `lens.reports` | `received_at` starshe 14 dney; `processing_status` = «Неактуально» | posle `lens_sync` |
+
+Migratsii funktsiy ochistki:
+
 ```bash
 docker compose exec -T db psql -U monitor -d monitor < sql/05_data_mos_purge_functions.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitoring_purge_functions.sql
+```
+
+Primery vyzova:
+
+```sql
+-- Pryamoy vyzov
+SELECT stroymonitoring.purge_boundaries_aip();
+SELECT lens.purge_reports();
+
+-- Proverka bez sokhraneniya (otkat)
+BEGIN;
+SELECT stroymonitoring.purge_boundaries_aip();
+SELECT count(*) FROM stroymonitoring.boundaries_aip;
+ROLLBACK;
+
+-- Predprosmotr: skolko strok popadet pod kazhdoe uslovie
+SELECT
+  count(*) FILTER (WHERE btrim(status::text) IN ('Введён', 'Введен')) AS by_status_vveden,
+  count(*) FILTER (WHERE btrim(status::text) = 'Работы не начаты') AS by_status_not_started,
+  count(*) FILTER (WHERE btrim(fno_level1_name::text) = 'Метро') AS by_metro,
+  count(*) FILTER (WHERE actual_object IS FALSE) AS by_actual_object
+FROM stroymonitoring.boundaries_aip;
+
+SELECT
+  count(*) FILTER (WHERE received_at < NOW() - INTERVAL '14 days') AS by_received_at,
+  count(*) FILTER (WHERE processing_status = 'Неактуально') AS by_processing_status
+FROM lens.reports;
 ```
 
 ## Pайплайн data_mos (2855, 62441, 62461, 62501)
@@ -109,6 +148,7 @@ docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tab
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/09_data_mos_geom_split.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitoring_purge_functions.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
 
@@ -177,6 +217,7 @@ docker compose up -d --build
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitoring_purge_functions.sql
 ```
 
 ## Genplan (`jsons_genplan/`)
@@ -207,6 +248,7 @@ docker compose up -d --build
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/05_data_mos_purge_functions.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitoring_purge_functions.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
 

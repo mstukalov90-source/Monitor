@@ -11,6 +11,7 @@ from collector.config import (
     STROYMONITORING_REMOTE_TABLE,
 )
 from collector.db import local_connection, log_job_run, web_geo_connection
+from collector.lens_stroymonitoring_purge import purge_boundaries_aip
 from collector.table_sync import sync_table
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ def run() -> None:
         run_id = log_job_run(conn, JOB_NAME, "running", "Started stroymonitoring sync")
 
     try:
+        purged = 0
         with web_geo_connection() as remote_conn, local_connection() as local_conn:
             count = sync_table(
                 remote_conn,
@@ -33,6 +35,8 @@ def run() -> None:
                 STROYMONITORING_LOCAL_SCHEMA,
                 STROYMONITORING_LOCAL_TABLE,
             )
+            with local_conn.cursor() as cur:
+                purged = purge_boundaries_aip(cur)
 
         qualified = f"{STROYMONITORING_LOCAL_SCHEMA}.{STROYMONITORING_LOCAL_TABLE}"
         with local_connection() as conn:
@@ -40,11 +44,16 @@ def run() -> None:
                 conn,
                 JOB_NAME,
                 "success",
-                f"Synced {qualified}: {count} rows",
+                f"Synced {qualified}: {count} rows, purged {purged} rows",
                 rows_affected=count,
                 run_id=run_id,
             )
-        logger.info("stroymonitoring_sync finished: %s rows in %s", count, qualified)
+        logger.info(
+            "stroymonitoring_sync finished: %s rows in %s, purged %s rows",
+            count,
+            qualified,
+            purged,
+        )
 
     except Exception as exc:
         logger.exception("stroymonitoring_sync job failed")

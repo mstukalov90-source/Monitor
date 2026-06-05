@@ -12,6 +12,7 @@ from collector.db import (
     log_job_run,
     remote_connection,
 )
+from collector.lens_stroymonitoring_purge import purge_reports
 from collector.table_sync import sync_table
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ def run() -> None:
 
     total_rows = 0
     tables_synced = 0
+    purged = 0
 
     try:
         with remote_connection() as remote_conn, local_connection() as local_conn:
@@ -54,16 +56,24 @@ def run() -> None:
             else:
                 logger.warning("SQL migration file not found: %s", REPORTS_GEOM_SQL)
 
+            with local_conn.cursor() as cur:
+                purged = purge_reports(cur)
+
         with local_connection() as conn:
             log_job_run(
                 conn,
                 JOB_NAME,
                 "success",
-                f"Synced {tables_synced} tables, {total_rows} rows",
+                f"Synced {tables_synced} tables, {total_rows} rows, purged {purged} reports",
                 rows_affected=total_rows,
                 run_id=run_id,
             )
-        logger.info("lens_sync finished: %s tables, %s rows", tables_synced, total_rows)
+        logger.info(
+            "lens_sync finished: %s tables, %s rows, purged %s reports",
+            tables_synced,
+            total_rows,
+            purged,
+        )
 
     except Exception as exc:
         logger.exception("lens_sync job failed")

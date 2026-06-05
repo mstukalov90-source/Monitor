@@ -113,5 +113,8 @@ DATA_MOS_EXPORT_BY_JOB: dict[str, DataMosExportConfig] = {
 
 DATA_MOS_TABLES_SQL = PROJECT_DIR / "sql" / "04_data_mos_dynamic_tables.sql"
 DATA_MOS_PURGE_FUNCTIONS_SQL = PROJECT_DIR / "sql" / "05_data_mos_purge_functions.sql"
+LENS_STROYMONITORING_PURGE_FUNCTIONS_SQL = (
+    PROJECT_DIR / "sql" / "14_lens_stroymonitoring_purge_functions.sql"
+)
 DATA_MOS_LINE_TO_POLYGON_SQL = PROJECT_DIR / "sql" / "07_line_to_polygon.sql"
 DATA_MOS_GEOM_SPLIT_SQL = PROJECT_DIR / "sql" / "09_data_mos_geom_split.sql"
