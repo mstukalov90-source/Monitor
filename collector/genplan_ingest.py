@@ -8,6 +8,7 @@ from psycopg2.extensions import cursor as Cursor
 
 from collector.data_mos_schema import prepare_value
 from collector.db import local_connection
+from collector.genplan_geom import POINT_GEOM_SQL, parse_coordinates, sync_coordinate_columns
 from collector.genplan_schema import (
     collect_schema_from_properties,
     ensure_columns,
@@ -23,12 +24,7 @@ PHOTO_META_TABLE = qualified_table(PHOTO_META_KIND)
 
 def parse_lat_lng(payload: dict) -> tuple[float, float]:
     """Return lat/lng or raise ValueError."""
-    try:
-        lat = float(payload["lat"])
-        lng = float(payload["lng"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("lat and lng are required numeric fields") from exc
-    return lat, lng
+    return parse_coordinates(payload)
 
 
 def _photo_uuid(payload: dict, *, fallback: Optional[str] = None) -> str:
@@ -59,7 +55,7 @@ def _update_photo_meta_row(
     dyn_cols = sorted(schema.keys())
     set_parts = ['"file_name" = %(file_name)s', "loaded_at = NOW()"]
     set_parts.extend(f'"{col}" = %({col})s' for col in dyn_cols)
-    set_parts.append("geom = ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326)")
+    set_parts.append(f"geom = {POINT_GEOM_SQL}")
 
     values: dict[str, Any] = {
         "id": row_id,
@@ -85,7 +81,11 @@ def _save_photo_meta(
     lat, lng = parse_lat_lng(payload)
     ensure_genplan_table(cur, PHOTO_META_KIND)
 
-    props = _photo_meta_props(payload, uuid=uuid)
+    props = sync_coordinate_columns(
+        _photo_meta_props(payload, uuid=uuid),
+        lat=lat,
+        lng=lng,
+    )
     schema = collect_schema_from_properties(props)
     ensure_columns(cur, PHOTO_META_TABLE, schema)
 

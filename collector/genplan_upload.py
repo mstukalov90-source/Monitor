@@ -6,6 +6,7 @@ from typing import Any
 
 from collector.db import local_connection
 from collector.genplan_photo_exif import PhotoUploadMeta
+from collector.genplan_geom import parse_coordinates, sync_coordinate_columns
 from collector.genplan_detect import GenplanKind
 from collector.genplan_schema import (
     collect_schema_from_properties,
@@ -40,16 +41,19 @@ def insert_uploaded_photo(
 ) -> None:
     """Insert one upload response row with request metadata."""
     payload = _merged_payload(response, request_meta)
-    lat = request_meta.lat
-    lng = request_meta.lng
+    lat, lng = parse_coordinates(payload)
 
     with local_connection() as conn:
         with conn.cursor() as cur:
             ensure_genplan_table(cur, UPLOADED_PHOTO_KIND)
-            props = extract_genplan_properties(
-                payload,
-                kind=UPLOADED_PHOTO_KIND,
-                extra={"uuid": payload.get("uuid")},
+            props = sync_coordinate_columns(
+                extract_genplan_properties(
+                    payload,
+                    kind=UPLOADED_PHOTO_KIND,
+                    extra={"uuid": payload.get("uuid")},
+                ),
+                lat=lat,
+                lng=lng,
             )
             schema = collect_schema_from_properties(props)
             ensure_columns(cur, UPLOADED_PHOTO_TABLE, schema)

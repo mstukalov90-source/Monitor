@@ -59,6 +59,8 @@ Accept: application/json
 
 Дополнительные поля из контракта MSI Holes допускаются и сохраняются в БД.
 
+Из координат `lat` и `lng` в PostGIS автоматически создаётся точка `geom` (EPSG:4326): `ST_MakePoint(lng, lat)`.
+
 Ответ при создании (`201 Created`):
 
 ```json
