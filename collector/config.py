@@ -1,5 +1,6 @@
 """Configuration from environment variables."""
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/app"))
 
 OGH_DISRUPTION_GEOJSON = PROJECT_DIR / "mggt_dgn" / "mggt_dgn.geojson"
 
+GENPLAN_API_DIR = PROJECT_DIR / "genplan api"
 GENPLAN_JSON_DIR = PROJECT_DIR / "jsons_genplan"
 GENPLAN_SAMPLE_FILES = frozenset({
     "order.json",
@@ -20,6 +22,57 @@ GENPLAN_SAMPLE_FILES = frozenset({
     "upload.json",
     "uuid_area.json",
 })
+MSI_HOLES_CREDENTIALS_FILE = GENPLAN_API_DIR / "msi-holes-backend.client.json"
+
+
+def _msi_holes_settings() -> tuple[str, str, str, str]:
+    """Env vars first; fall back to genplan api/msi-holes-backend.client.json."""
+    client_id = os.getenv("MSI_HOLES_CLIENT_ID", "")
+    client_secret = os.getenv("MSI_HOLES_CLIENT_SECRET", "")
+    base_url = os.getenv("MSI_HOLES_BASE_URL", "https://m2m.msi-holes.cxm.dev")
+    token_endpoint = os.getenv(
+        "MSI_HOLES_TOKEN_ENDPOINT", "https://id.cxm.dev/oauth2/token"
+    )
+    if (not client_id or not client_secret) and MSI_HOLES_CREDENTIALS_FILE.is_file():
+        data = json.loads(MSI_HOLES_CREDENTIALS_FILE.read_text(encoding="utf-8"))
+        client_id = client_id or str(data.get("client_id", ""))
+        client_secret = client_secret or str(data.get("client_secret", ""))
+        if not os.getenv("MSI_HOLES_TOKEN_ENDPOINT"):
+            token_endpoint = str(data.get("token_endpoint", token_endpoint))
+        if not os.getenv("MSI_HOLES_BASE_URL") and data.get("base_url"):
+            base_url = str(data["base_url"])
+    return client_id, client_secret, base_url, token_endpoint
+
+
+MSI_HOLES_CLIENT_ID, MSI_HOLES_CLIENT_SECRET, MSI_HOLES_BASE_URL, MSI_HOLES_TOKEN_ENDPOINT = (
+    _msi_holes_settings()
+)
+GENPLAN_SEARCH_LAT = float(os.getenv("GENPLAN_SEARCH_LAT", "55.7558"))
+GENPLAN_SEARCH_LNG = float(os.getenv("GENPLAN_SEARCH_LNG", "37.6173"))
+GENPLAN_SEARCH_RADIUS_M = int(os.getenv("GENPLAN_SEARCH_RADIUS_M", "1000"))
+# 0 = no limit; set e.g. 20 for local smoke tests
+GENPLAN_FETCH_META_LIMIT = int(os.getenv("GENPLAN_FETCH_META_LIMIT", "0"))
+GENPLAN_PHOTO_UPLOAD_DIR = PROJECT_DIR / "photo_to_upload"
+GENPLAN_PHOTO_UPLOADED_DIR = PROJECT_DIR / "photo_uploaded"
+
+MONITOR_API_PORT = int(os.getenv("MONITOR_API_PORT", "8000"))
+MONITOR_API_PUBLIC_BASE_URL = os.getenv(
+    "MONITOR_API_PUBLIC_BASE_URL", "http://77.222.63.161:8000"
+)
+
+
+def _monitor_api_keys() -> frozenset[str]:
+    keys: list[str] = []
+    single = os.getenv("MONITOR_API_KEY", "").strip()
+    if single:
+        keys.append(single)
+    multi = os.getenv("MONITOR_API_KEYS", "")
+    if multi:
+        keys.extend(part.strip() for part in multi.split(",") if part.strip())
+    return frozenset(keys)
+
+
+MONITOR_API_KEYS = _monitor_api_keys()
 
 LOCAL_DB = {
     "host": os.getenv("LOCAL_DB_HOST", "localhost"),

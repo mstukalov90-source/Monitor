@@ -9,6 +9,7 @@ from pathlib import Path
 from collector.config import GENPLAN_JSON_DIR, GENPLAN_SAMPLE_FILES
 from collector.db import local_connection, log_job_run
 from collector.genplan_detect import classify_genplan_payload
+from collector.genplan_ingest import insert_photo_meta
 from collector.genplan_schema import (
     collect_schema_from_properties,
     ensure_columns,
@@ -24,15 +25,6 @@ logger = logging.getLogger(__name__)
 JOB_NAME = "genplan"
 
 
-def _parse_lat_lng(payload: dict) -> tuple[float, float] | None:
-    try:
-        lat = float(payload["lat"])
-        lng = float(payload["lng"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    return lat, lng
-
-
 def process_file(file_path: Path) -> int:
     """Import one JSON file; return number of rows inserted."""
     with open(file_path, encoding="utf-8") as f:
@@ -43,6 +35,11 @@ def process_file(file_path: Path) -> int:
         raise ValueError(f"Unrecognized JSON structure: {file_path.name}")
 
     file_name = file_path.name
+
+    if kind == "photo_meta":
+        insert_photo_meta(payload, file_name=file_name)
+        return 1
+
     rows = 0
 
     with local_connection() as conn:
@@ -82,11 +79,6 @@ def process_file(file_path: Path) -> int:
                 if not isinstance(wkt_val, str) or not wkt_val.strip():
                     raise ValueError(f"Missing wkt: {file_path.name}")
                 wkt = wkt_val.strip()
-            elif kind == "photo_meta":
-                coords = _parse_lat_lng(payload)
-                if coords is None:
-                    raise ValueError(f"Invalid lat/lng: {file_path.name}")
-                lat, lng = coords
 
             insert_genplan_row(
                 cur,

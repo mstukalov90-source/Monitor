@@ -4,7 +4,11 @@ Scheduler for MONITOR data collector.
 Daily schedule (Europe/Moscow):
   03:00 — data_mos (all 8 exports sequentially), then ogh_disruption if mggt_dgn.geojson exists
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
-  05:00 — genplan jsons_genplan/*.json import
+  06:00 — vector_stroy_url_222 GeoJSON upsert
+
+  genplan_pipeline (genplan_fetch + import) — manual only: --run genplan_pipeline
+  genplan_upload — manual only: --run genplan_upload
+  genplan_upload_pipeline — genplan_upload → genplan_fetch → genplan (manual)
 """
 
 from __future__ import annotations
@@ -20,7 +24,9 @@ from apscheduler.triggers.cron import CronTrigger
 from collector.config import DATA_MOS_EXPORTS, TZ
 from collector.jobs import (
     data_mos_job,
+    genplan_fetch_job,
     genplan_job,
+    genplan_upload_job,
     lens_sync_job,
     ogh_disruption_job,
     stroymonitoring_sync_job,
@@ -41,6 +47,19 @@ def run_lens_pipeline() -> None:
     stroymonitoring_sync_job.run()
 
 
+def run_genplan_pipeline() -> None:
+    """Run genplan_fetch then genplan import (05:00 chain)."""
+    genplan_fetch_job.run()
+    genplan_job.run()
+
+
+def run_genplan_upload_pipeline() -> None:
+    """Upload local photos, then fetch meta and import JSON."""
+    genplan_upload_job.run()
+    genplan_fetch_job.run()
+    genplan_job.run()
+
+
 def _build_jobs() -> dict[str, Callable[[], None]]:
     jobs: dict[str, Callable[[], None]] = {
         "data_mos": data_mos_job.run_all_data_mos,
@@ -48,7 +67,11 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "lens_pipeline": run_lens_pipeline,
         "lens_sync": lens_sync_job.run,
         "stroymonitoring_sync": stroymonitoring_sync_job.run,
+        "genplan_fetch": genplan_fetch_job.run,
         "genplan": genplan_job.run,
+        "genplan_upload": genplan_upload_job.run,
+        "genplan_pipeline": run_genplan_pipeline,
+        "genplan_upload_pipeline": run_genplan_upload_pipeline,
         "vector_stroy_url_222": vector_stroy_job.run,
     }
     for config in DATA_MOS_EXPORTS:
@@ -63,7 +86,6 @@ RUN_ALL_ORDER: tuple[str, ...] = (
     "data_mos",
     "ogh_disruption",
     "lens_pipeline",
-    "genplan",
     "vector_stroy_url_222",
 )
 
@@ -93,13 +115,6 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
-        genplan_job.run,
-        CronTrigger(hour=5, minute=0, timezone=TZ),
-        id="genplan",
-        name="Genplan response JSON import",
-        replace_existing=True,
-    )
-    scheduler.add_job(
         vector_stroy_job.run,
         CronTrigger(hour=6, minute=0, timezone=TZ),
         id="vector_stroy_url_222",
@@ -113,8 +128,9 @@ def start_scheduler() -> None:
         logger.info("         — %s", config.job_name)
     logger.info("         — ogh_disruption (mggt_dgn/mggt_dgn.geojson, if present)")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
-    logger.info("  05:00 — genplan")
     logger.info("  06:00 — vector_stroy_url_222")
+    logger.info("  (genplan_pipeline — manual only: --run genplan_pipeline)")
+    logger.info("  (genplan_upload — manual only: --run genplan_upload)")
 
     try:
         scheduler.start()

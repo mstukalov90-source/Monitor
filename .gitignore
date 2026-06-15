@@ -8,3 +8,4 @@ Data_mos_export.gpkg
 *_raw.json
 /id_rsa
 /id_rsa.pub
+/genplan api/msi-holes-backend.client.json

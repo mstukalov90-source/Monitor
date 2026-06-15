@@ -8,8 +8,11 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 |-------|--------|----------|
 | 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
-| 05:00 | `genplan` | Import `jsons_genplan/*.json` v 4 tablitsy `genplan.*` (klassifikatsiya po strukture JSON), udalenie obrabotannykh faylov |
 | 06:00 | `vector_stroy_url_222` | Esli v korne proekta est `url_222_wgs.geojson` — upsert v `vector_stroy.url_222` po `uuid`, zatem udalenie fayla; inache propusk |
+
+`genplan_pipeline` (`genplan_fetch` + import) — **tolko ruchnoy zapusk**: `--run genplan_pipeline`
+
+`genplan_upload` — zagruzka fotografiy iz `photo_to_upload/` v MSI Holes API (`POST /api/upload`); otvet zapisyvaetsya v `genplan.uploaded_photo`. Posle uspekha fayl peremeshchaetsya v `photo_uploaded/`. Zapusk: `--run genplan_upload` ili tsepochka `--run genplan_upload_pipeline` (upload → fetch → import).
 
 Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
 
@@ -167,6 +170,8 @@ docker compose exec collector python -m collector.scheduler --run data_mos_1498
 docker compose exec collector python -m collector.scheduler --run lens_pipeline
 docker compose exec collector python -m collector.scheduler --run lens_sync
 docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
+docker compose exec collector python -m collector.scheduler --run genplan_pipeline
+docker compose exec collector python -m collector.scheduler --run genplan_fetch
 docker compose exec collector python -m collector.scheduler --run genplan
 docker compose exec collector python -m collector.scheduler --run ogh_disruption
 docker compose exec collector python -m collector.scheduler --run vector_stroy_url_222
@@ -222,6 +227,22 @@ docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitori
 
 ## Genplan (`jsons_genplan/`)
 
+V 05:00 cron **ne zapuskaetsya** — tolko vruchnuyu: `--run genplan_pipeline`. Shagi: `genplan_fetch` zabiraet dannye iz MSI Holes API (`POST /api/spatial_search`, `GET /api/photos/meta/{uuid}`), zatem `genplan` importiruet JSON v BD.
+
+Peremennye okruzheniya (v `.env`):
+
+```
+MSI_HOLES_CLIENT_ID=
+MSI_HOLES_CLIENT_SECRET=
+MSI_HOLES_BASE_URL=https://m2m.msi-holes.cxm.dev
+MSI_HOLES_TOKEN_ENDPOINT=https://id.cxm.dev/oauth2/token
+GENPLAN_SEARCH_LAT=55.7558
+GENPLAN_SEARCH_LNG=37.6173
+GENPLAN_SEARCH_RADIUS_M=1000
+```
+
+Po umolchaniyu poisk vypolnyaetsya v radius 1 km ot tsentra Moskvy. UUID, uzhe prisutstvuyushchie v `genplan.uuid_area` ili `genplan.photo_meta`, propuskayutsya.
+
 JSON-fayly v papke `jsons_genplan/` (v korne proekta, v Docker — `/app/jsons_genplan`). Tip opredelyaetsya po strukture, ne po imeni fayla:
 
 | Struktura | Tablitsa | Geometriya |
@@ -232,6 +253,72 @@ JSON-fayly v papke `jsons_genplan/` (v korne proekta, v Docker — `/app/jsons_g
 | bez koordinat | `genplan.upload` | bez `geom` |
 
 Ostalnye klyuchi JSON → dinamicheskie kolonki (snake_case). Obraztsy `order.json`, `photo_meta.json`, `upload.json`, `uuid_area.json` posle importa ne udalyayutsya.
+
+### Zagruzka fotografiy v Genplan (`photo_to_upload/`)
+
+Ruchnoy job `genplan_upload` otpravlyaet snimki v MSI Holes API. Metadannye formiruyutsya avtomaticheski:
+
+| Pole | Istochnik |
+|------|-----------|
+| `date` | EXIF `DateTimeOriginal` / `DateTime`, inache data iz imeni fayla (`YYYY-MM-DD`) |
+| `lat`, `lng` | EXIF GPS |
+| `azimuth_deg` | EXIF `GPSImgDirection` |
+
+Esli dannykh net — pole ne otpravlyaetsya v API i v BD zapisyvaetsya `NULL`.
+
+```bash
+# Polozhit .jpg / .png v photo_to_upload/
+docker compose exec collector python -m collector.scheduler --run genplan_upload
+
+# Upload + poluchenie meta + import v BD
+docker compose exec collector python -m collector.scheduler --run genplan_upload_pipeline
+```
+
+Migratsiya tablitsy `genplan.uploaded_photo`:
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/16_genplan_uploaded_photo.sql
+```
+
+Proverka:
+
+```sql
+SELECT file_name, uuid, name, upload_at, lat, lng, azimuth_deg, loaded_at
+FROM genplan.uploaded_photo
+ORDER BY loaded_at DESC
+LIMIT 10;
+```
+
+## Genplan M2M API (priem meta)
+
+Otdelnyy servis `api` prinimaet JSON metadannykh fotografiy ot kolleg (push). Dannye sohranyayutsya v `genplan.photo_meta` s upsert po `uuid`.
+
+```bash
+docker compose up -d --build api
+curl -s http://localhost:8000/health
+```
+
+Peremennye v `.env`:
+
+```
+MONITOR_API_PUBLIC_BASE_URL=http://77.222.63.161:8000
+MONITOR_API_KEY=<64_hex_chars>   # 256 bit: python3 -c "import secrets; print(secrets.token_hex(32))"
+MONITOR_API_KEYS=                # opcionalno: key1,key2
+MONITOR_API_PORT=8000
+```
+
+Kollegam peredat Base URL `http://77.222.63.161:8000` i vydannyj API-klyuch. Otkryt port 8000 v firewall tolko dlya IP kolleg.
+
+Endpoint: `PUT /api/photos/meta/{uuid}`, zagolovok `Authorization: Bearer <MONITOR_API_KEY>`.
+
+Dokumentatsiya dlya kolleg: `genplan api/ONBOARDING.md`, `genplan api/monitor-api-doc.md`, primer klienta `genplan api/monitor_client.py`.
+
+Migratsiya uuid dlya sushchestvuyushchey BD:
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/16_genplan_uploaded_photo.sql
+```
 
 ## SSH tunnel to DB
 

@@ -22,6 +22,8 @@ services:
       - ./sql/12_odh_export_ogh_disruption_coords.sql:/docker-entrypoint-initdb.d/08-odh-export-ogh-disruption-coords.sql:ro
       - ./sql/13_odh_export_move_schema.sql:/docker-entrypoint-initdb.d/09-odh-export-move-schema.sql:ro
       - ./sql/14_lens_stroymonitoring_purge_functions.sql:/docker-entrypoint-initdb.d/10-lens-stroymonitoring-purge-functions.sql:ro
+      - ./sql/15_genplan_photo_meta_uuid.sql:/docker-entrypoint-initdb.d/11-genplan-photo-meta-uuid.sql:ro
+      - ./sql/16_genplan_uploaded_photo.sql:/docker-entrypoint-initdb.d/12-genplan-uploaded-photo.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s
@@ -55,10 +57,44 @@ services:
       WEB_GEO_DB_USER: ${WEB_GEO_DB_USER:-asidorov}
       WEB_GEO_DB_PASSWORD: ${WEB_GEO_DB_PASSWORD:-8XoMsO3Vyz}
       DATA_MOS_API_KEY: ${DATA_MOS_API_KEY:-}
+      MSI_HOLES_CLIENT_ID: ${MSI_HOLES_CLIENT_ID:-}
+      MSI_HOLES_CLIENT_SECRET: ${MSI_HOLES_CLIENT_SECRET:-}
+      MSI_HOLES_BASE_URL: ${MSI_HOLES_BASE_URL:-https://m2m.msi-holes.cxm.dev}
+      MSI_HOLES_TOKEN_ENDPOINT: ${MSI_HOLES_TOKEN_ENDPOINT:-https://id.cxm.dev/oauth2/token}
+      GENPLAN_SEARCH_LAT: ${GENPLAN_SEARCH_LAT:-55.7558}
+      GENPLAN_SEARCH_LNG: ${GENPLAN_SEARCH_LNG:-37.6173}
+      GENPLAN_SEARCH_RADIUS_M: ${GENPLAN_SEARCH_RADIUS_M:-1000}
+      GENPLAN_FETCH_META_LIMIT: ${GENPLAN_FETCH_META_LIMIT:-0}
       PROJECT_DIR: /app
     volumes:
       - .:/app
     command: ["python", "-m", "collector.scheduler"]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: monitor-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+      LOCAL_DB_HOST: db
+      LOCAL_DB_PORT: 5432
+      LOCAL_DB_NAME: ${POSTGRES_DB:-monitor}
+      LOCAL_DB_USER: ${POSTGRES_USER:-monitor}
+      LOCAL_DB_PASSWORD: ${POSTGRES_PASSWORD:-monitor}
+      MONITOR_API_KEY: ${MONITOR_API_KEY:-}
+      MONITOR_API_KEYS: ${MONITOR_API_KEYS:-}
+      MONITOR_API_PUBLIC_BASE_URL: ${MONITOR_API_PUBLIC_BASE_URL:-http://77.222.63.161:8000}
+      PROJECT_DIR: /app
+    ports:
+      - "${MONITOR_API_PORT:-8000}:8000"
+    volumes:
+      - .:/app
+    command: ["uvicorn", "collector.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:
   pgdata:

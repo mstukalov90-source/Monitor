@@ -20,6 +20,7 @@ _EXCLUDE_BY_KIND: dict[GenplanKind, frozenset[str]] = {
     "order": frozenset({"wkt"}),
     "photo_meta": frozenset(),
     "upload": frozenset(),
+    "uploaded_photo": frozenset(),
     "uuid_area": frozenset({"uuids"}),
 }
 
@@ -154,6 +155,36 @@ def ensure_genplan_table(cur: Cursor, kind: GenplanKind) -> None:
         cur.execute(
             f"CREATE INDEX IF NOT EXISTS idx_genplan_upload_loaded_at ON {q} (loaded_at DESC)"
         )
+    elif kind == "uploaded_photo":
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {q} (
+                id          BIGSERIAL PRIMARY KEY,
+                file_name   TEXT NOT NULL,
+                geom        GEOMETRY(Point, 4326),
+                loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        cur.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_genplan_uploaded_photo_geom ON {q} USING GIST (geom)"
+        )
+        cur.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_genplan_uploaded_photo_file_name ON {q} (file_name)"
+        )
+        cur.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_genplan_uploaded_photo_loaded_at ON {q} (loaded_at DESC)"
+        )
+        cur.execute(
+            f"ALTER TABLE {q} ADD COLUMN IF NOT EXISTS uuid TEXT"
+        )
+        cur.execute(
+            f"""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_genplan_uploaded_photo_uuid_unique
+            ON {q} (uuid)
+            WHERE uuid IS NOT NULL AND btrim(uuid) <> ''
+            """
+        )
     else:
         cur.execute(
             f"""
@@ -203,6 +234,11 @@ def insert_genplan_row(
         ph_parts.append("ST_SetSRID(ST_GeomFromText(%(wkt)s), 4326)")
         values["wkt"] = wkt
     elif kind == "photo_meta" and lat is not None and lng is not None:
+        col_parts.append("geom")
+        ph_parts.append("ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326)")
+        values["lat"] = lat
+        values["lng"] = lng
+    elif kind == "uploaded_photo" and lat is not None and lng is not None:
         col_parts.append("geom")
         ph_parts.append("ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326)")
         values["lat"] = lat
