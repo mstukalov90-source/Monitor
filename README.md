@@ -218,12 +218,17 @@ apt-get update && apt-get install -y ca-certificates curl gnupg git
 # ... Docker install (see previous README section) ...
 cd /opt/monitor
 cp .env.example .env
+# Zapolnit .env: MSI_HOLES_CLIENT_ID/SECRET (ili skopirovat genplan api/msi-holes-backend.client.json)
 docker compose up -d --build
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitoring_purge_functions.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/16_genplan_uploaded_photo.sql
 ```
+
+MSI Holes credentials **ne v git** (`.gitignore`: `genplan api/msi-holes-backend.client.json`). Na VPS — libo fayl v `genplan api/`, libo peremennye v `.env`.
 
 ## Genplan (`jsons_genplan/`)
 
@@ -336,6 +341,8 @@ docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tab
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/05_data_mos_purge_functions.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitoring_purge_functions.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/16_genplan_uploaded_photo.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
 
@@ -345,6 +352,14 @@ docker compose exec collector python -m collector.scheduler --run data_mos
 docker compose ps
 docker compose exec collector python -m collector.scheduler --run data_mos_1498
 docker compose logs collector --tail 200
+
+# MONITOR M2M API (esli podnyat servis api)
+curl -s http://localhost:8000/health
+
+# Genplan upload (smoke test, opcionalno)
+mkdir -p photo_to_upload
+# polozhit odin testovyy .jpg v photo_to_upload/
+docker compose exec collector python -m collector.scheduler --run genplan_upload
 ```
 
 ```sql
@@ -354,6 +369,24 @@ WHERE table_schema = 'data_mos' AND table_name LIKE 'items_%' ORDER BY 1;
 SELECT count(*) FROM data_mos.items_1498;
 SELECT count(*) FROM data_mos.items_2855;
 SELECT count(*) FROM stroymonitoring.boundaries_aip;
+
+-- Genplan: tablitsy i poslednie zagruzki
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'genplan' ORDER BY 1;
+
+SELECT file_name, uuid, name, upload_at, lat, lng, loaded_at
+FROM genplan.uploaded_photo
+ORDER BY loaded_at DESC
+LIMIT 5;
+
+SELECT job_name, status, message, started_at
+FROM collector.job_runs
+WHERE job_name IN ('genplan_upload', 'genplan_fetch', 'genplan')
+ORDER BY started_at DESC
+LIMIT 10;
 ```
 
-Proverte, chto port 5432 nedostupen izvne bez SSH-tunnelya.
+Proverte:
+- port 5432 nedostupen izvne bez SSH-tunnelya;
+- `genplan api/msi-holes-backend.client.json` ili `MSI_HOLES_*` v `.env` na meste;
+- posle uspeshnogo `genplan_upload` fayl peremeshchen v `photo_uploaded/`.

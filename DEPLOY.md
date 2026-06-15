@@ -42,6 +42,25 @@ nano .env   # или другой редактор
 - `REMOTE_DB_*` — доступ к SPS для `lens_sync`
 - `WEB_GEO_DB_PASSWORD` — для `stroymonitoring_sync`
 - `DATA_MOS_API_KEY` — при необходимости для data.mos.ru
+- `MONITOR_API_KEY` — 256-битный API-ключ для M2M-приёма photo meta (64 hex-символа)
+- `MONITOR_API_PUBLIC_BASE_URL` — публичный адрес API для коллег (без домена: `http://<IP_VPS>:8000`)
+- `MONITOR_API_PORT` — порт на хосте (по умолчанию `8000`)
+
+Сгенерировать ключ:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Пример в `.env`:
+
+```env
+MONITOR_API_PUBLIC_BASE_URL=http://77.222.63.161:8000
+MONITOR_API_KEY=<64_hex_chars>
+MONITOR_API_PORT=8000
+```
+
+Ключ передаётся коллегам отдельно (см. `genplan api/ONBOARDING.md`). В git не коммитить.
 
 Файл `.env` не коммитить в git.
 
@@ -57,6 +76,7 @@ docker compose ps
 
 - `monitor-db` — PostGIS (порт `5432` на всех интерфейсах VPS)
 - `monitor-collector` — планировщик ETL (03:00 / 04:00 / 05:00, Europe/Moscow)
+- `monitor-api` — M2M HTTP API приёма genplan photo meta (порт `8000`)
 
 ## 4. Перенос базы данных с локальной машины
 
@@ -174,9 +194,98 @@ docker compose up -d --build
 docker compose ps
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
 ```
 
-При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`, `sql/10_genplan_multi_tables.sql`).
+При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`, `sql/10_genplan_multi_tables.sql`, `sql/15_genplan_photo_meta_uuid.sql`).
+
+## 9. Genplan M2M API (приём photo meta)
+
+Коллеги отправляют JSON метаданных фотографий на MONITOR в push-режиме (`PUT /api/photos/meta/{uuid}`). Данные сохраняются в `genplan.photo_meta` с upsert по `uuid`.
+
+Домен не используется — доступ по IP VPS, например `http://77.222.63.161:8000`. Протокол HTTP (без TLS).
+
+Документация для коллег:
+
+- `genplan api/ONBOARDING.md` — быстрый старт
+- `genplan api/monitor-api-doc.md` — контракт API
+- `genplan api/monitor_client.py` — пример Python-клиента
+
+### 9.1 Чеклист деплоя API
+
+- [ ] Код на VPS актуален (`git pull`)
+- [ ] В `.env` задан `MONITOR_API_KEY` (без него API отвечает `503`)
+- [ ] В `.env` задан `MONITOR_API_PUBLIC_BASE_URL=http://<IP_VPS>:8000`
+- [ ] Применена миграция `sql/15_genplan_photo_meta_uuid.sql` (обязательно на **существующей** БД; на новой — подхватывается initdb)
+- [ ] Запущен сервис `api`: `docker compose up -d --build api`
+- [ ] Порт `8000` открыт в firewall **только для IP коллег**
+- [ ] Проверены `health` и тестовый `PUT`
+
+### 9.2 Запуск и миграция
+
+```bash
+cd /opt/monitor
+
+# миграция (если БД уже была до появления API)
+docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
+
+# поднять API (или весь стек)
+docker compose up -d --build api
+docker compose ps
+```
+
+### 9.3 Firewall для порта 8000
+
+```bash
+# разрешить только IP коллеги (пример)
+ufw allow from <colleague_ip> to any port 8000 proto tcp
+ufw reload
+```
+
+Порт `5432` по-прежнему не открывать для всего интернета.
+
+### 9.4 Проверка после деплоя
+
+```bash
+curl -s http://77.222.63.161:8000/health
+# ожидается: {"status":"ok"}
+
+curl -s -w "\nHTTP %{http_code}\n" -X PUT \
+  "http://77.222.63.161:8000/api/photos/meta/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer $MONITOR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "done",
+    "lat": 55.78418187985141,
+    "lng": 37.74234417284182,
+    "image_name": "test.jpg"
+  }'
+# первая отправка: HTTP 201, повторная с тем же uuid: HTTP 200
+
+docker compose exec -T db psql -U monitor -d monitor -c "
+SELECT uuid, status, lat, lng, loaded_at
+FROM genplan.photo_meta
+WHERE uuid = '550e8400-e29b-41d4-a716-446655440000';
+"
+```
+
+### 9.5 Что передать коллегам
+
+| Параметр | Значение |
+|----------|----------|
+| Base URL | `http://77.222.63.161:8000` |
+| Метод | `PUT /api/photos/meta/{uuid}` |
+| Auth | `Authorization: Bearer <MONITOR_API_KEY>` |
+| Формат тела | JSON как в `genplan api/monitor-api-doc.md` |
+
+Передаётся **только JSON meta**, не файл изображения.
+
+### 9.6 Ограничения
+
+- HTTPS не настроен (доступ по голому IP)
+- `GET` для чтения meta не реализован — endpoint только **принимает** данные
+- Nightly `genplan_fetch` может работать параллельно как резервный канал
 
 ## Расписание задач
 
