@@ -6,7 +6,7 @@ from typing import Any
 
 from collector.db import local_connection
 from collector.genplan_photo_exif import PhotoUploadMeta
-from collector.genplan_geom import parse_coordinates, sync_coordinate_columns
+from collector.genplan_geom import sync_coordinate_columns, try_parse_coordinates
 from collector.genplan_detect import GenplanKind
 from collector.genplan_schema import (
     collect_schema_from_properties,
@@ -28,7 +28,7 @@ def _merged_payload(
 ) -> dict[str, Any]:
     payload = dict(response)
     for key, value in request_meta.as_db_payload().items():
-        if key not in payload:
+        if value is not None and key not in payload:
             payload[key] = value
     return payload
 
@@ -41,20 +41,19 @@ def insert_uploaded_photo(
 ) -> None:
     """Insert one upload response row with request metadata."""
     payload = _merged_payload(response, request_meta)
-    lat, lng = parse_coordinates(payload)
+    coords = try_parse_coordinates(payload)
+    lat, lng = coords if coords is not None else (None, None)
 
     with local_connection() as conn:
         with conn.cursor() as cur:
             ensure_genplan_table(cur, UPLOADED_PHOTO_KIND)
-            props = sync_coordinate_columns(
-                extract_genplan_properties(
-                    payload,
-                    kind=UPLOADED_PHOTO_KIND,
-                    extra={"uuid": payload.get("uuid")},
-                ),
-                lat=lat,
-                lng=lng,
+            props = extract_genplan_properties(
+                payload,
+                kind=UPLOADED_PHOTO_KIND,
+                extra={"uuid": payload.get("uuid")},
             )
+            if coords is not None:
+                props = sync_coordinate_columns(props, lat=coords[0], lng=coords[1])
             schema = collect_schema_from_properties(props)
             ensure_columns(cur, UPLOADED_PHOTO_TABLE, schema)
             insert_genplan_row(

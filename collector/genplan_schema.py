@@ -14,7 +14,7 @@ from collector.data_mos_schema import (
     to_column_name,
 )
 from collector.genplan_detect import GenplanKind, TABLE_BY_KIND
-from collector.genplan_geom import POINT_GEOM_SQL, parse_coordinates
+from collector.genplan_geom import POINT_GEOM_SQL, try_parse_coordinates
 
 _RESERVED_BASE = frozenset({"id", "geom", "loaded_at", "file_name", "uuid"})
 _EXCLUDE_BY_KIND: dict[GenplanKind, frozenset[str]] = {
@@ -235,12 +235,15 @@ def insert_genplan_row(
         ph_parts.append("ST_SetSRID(ST_GeomFromText(%(wkt)s), 4326)")
         values["wkt"] = wkt
     elif kind in ("photo_meta", "uploaded_photo"):
-        if lat is None or lng is None:
-            lat, lng = parse_coordinates(props)
-        col_parts.append("geom")
-        ph_parts.append(POINT_GEOM_SQL)
-        values["lat"] = lat
-        values["lng"] = lng
+        coords: tuple[float, float] | None = None
+        if lat is not None and lng is not None:
+            coords = (lat, lng)
+        else:
+            coords = try_parse_coordinates(props)
+        if coords is not None:
+            col_parts.append("geom")
+            ph_parts.append(POINT_GEOM_SQL)
+            values["lat"], values["lng"] = coords
 
     col_list = ", ".join(col_parts)
     placeholders = ", ".join(ph_parts)

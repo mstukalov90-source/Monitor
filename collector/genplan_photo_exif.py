@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 from PIL import ExifTags, Image
 
+from collector.genplan_geom import is_valid_wgs84_pair
+
 _DATE_FROM_FILENAME = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _PHOTO_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
 
@@ -27,10 +29,9 @@ class PhotoUploadMeta:
         data: dict[str, str | float] = {}
         if self.date is not None:
             data["date"] = self.date
-        if self.lat is not None:
-            data["lat"] = self.lat
-        if self.lng is not None:
-            data["lng"] = self.lng
+        if is_valid_wgs84_pair(self.lat, self.lng):
+            data["lat"] = self.lat  # type: ignore[assignment]
+            data["lng"] = self.lng  # type: ignore[assignment]
         if self.azimuth_deg is not None:
             data["azimuth_deg"] = self.azimuth_deg
         return data
@@ -74,6 +75,9 @@ def extract_photo_upload_meta(path: Path) -> PhotoUploadMeta:
                 azimuth_deg = _azimuth_from_exif(exif)
     except OSError:
         pass
+
+    if not is_valid_wgs84_pair(lat, lng):
+        lat, lng = None, None
 
     return PhotoUploadMeta(date=date, lat=lat, lng=lng, azimuth_deg=azimuth_deg)
 
