@@ -9,6 +9,7 @@ Daily schedule (Europe/Moscow):
   genplan_pipeline (genplan_fetch + import) — manual only: --run genplan_pipeline
   genplan_upload — manual only: --run genplan_upload
   genplan_upload_pipeline — genplan_upload → genplan_fetch → genplan (manual)
+  genplan_download — download photos (disruption in hood) to downloaded_photo/ (manual)
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from apscheduler.triggers.cron import CronTrigger
 from collector.config import DATA_MOS_EXPORTS, TZ
 from collector.jobs import (
     data_mos_job,
+    genplan_download_job,
     genplan_fetch_job,
     genplan_job,
     genplan_upload_job,
@@ -70,6 +72,7 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "genplan_fetch": genplan_fetch_job.run,
         "genplan": genplan_job.run,
         "genplan_upload": genplan_upload_job.run,
+        "genplan_download": genplan_download_job.run,
         "genplan_pipeline": run_genplan_pipeline,
         "genplan_upload_pipeline": run_genplan_upload_pipeline,
         "vector_stroy_url_222": vector_stroy_job.run,
@@ -131,6 +134,7 @@ def start_scheduler() -> None:
     logger.info("  06:00 — vector_stroy_url_222")
     logger.info("  (genplan_pipeline — manual only: --run genplan_pipeline)")
     logger.info("  (genplan_upload — manual only: --run genplan_upload)")
+    logger.info("  (genplan_download — manual only: --run genplan_download)")
 
     try:
         scheduler.start()
