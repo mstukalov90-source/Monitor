@@ -8,7 +8,12 @@ from psycopg2.extensions import cursor as Cursor
 
 from collector.data_mos_schema import prepare_value
 from collector.db import local_connection
-from collector.genplan_geom import POINT_GEOM_SQL, parse_coordinates, sync_coordinate_columns
+from collector.genplan_geom import (
+    POINT_GEOM_SQL,
+    parse_coordinates,
+    sync_coordinate_columns,
+    try_parse_coordinates,
+)
 from collector.genplan_schema import (
     collect_schema_from_properties,
     ensure_columns,
@@ -49,21 +54,26 @@ def _update_photo_meta_row(
     row_id: int,
     file_name: str,
     props: dict[str, Any],
-    lat: float,
-    lng: float,
+    lat: float | None,
+    lng: float | None,
 ) -> None:
     dyn_cols = sorted(schema.keys())
     set_parts = ['"file_name" = %(file_name)s', "loaded_at = NOW()"]
     set_parts.extend(f'"{col}" = %({col})s' for col in dyn_cols)
-    set_parts.append(f"geom = {POINT_GEOM_SQL}")
 
     values: dict[str, Any] = {
         "id": row_id,
         "file_name": file_name,
-        "lat": lat,
-        "lng": lng,
         **{col: prepare_value(props.get(col), schema[col]) for col in dyn_cols},
     }
+
+    if lat is not None and lng is not None:
+        set_parts.append(f"geom = {POINT_GEOM_SQL}")
+        values["lat"] = lat
+        values["lng"] = lng
+    else:
+        set_parts.append("geom = NULL")
+
     cur.execute(
         f"UPDATE {PHOTO_META_TABLE} SET {', '.join(set_parts)} WHERE id = %(id)s",
         values,
@@ -78,14 +88,13 @@ def _save_photo_meta(
     uuid: str,
     upsert: bool,
 ) -> Literal["created", "updated"]:
-    lat, lng = parse_lat_lng(payload)
+    coords = try_parse_coordinates(payload)
+    lat, lng = coords if coords is not None else (None, None)
     ensure_genplan_table(cur, PHOTO_META_KIND)
 
-    props = sync_coordinate_columns(
-        _photo_meta_props(payload, uuid=uuid),
-        lat=lat,
-        lng=lng,
-    )
+    props = _photo_meta_props(payload, uuid=uuid)
+    if coords is not None:
+        props = sync_coordinate_columns(props, lat=lat, lng=lng)
     schema = collect_schema_from_properties(props)
     ensure_columns(cur, PHOTO_META_TABLE, schema)
 

@@ -12,7 +12,9 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 
 `genplan_pipeline` (`genplan_fetch` + import) — **tolko ruchnoy zapusk**: `--run genplan_pipeline`
 
-`genplan_upload` — zagruzka fotografiy iz `photo_to_upload/` v MSI Holes API (`POST /api/upload`); otvet zapisyvaetsya v `genplan.uploaded_photo`. Posle uspekha fayl peremeshchaetsya v `photo_uploaded/`. Zapusk: `--run genplan_upload` ili tsepochka `--run genplan_upload_pipeline` (upload → fetch → import).
+`genplan_upload` — zagruzka fotografiy iz `photo_to_upload/` v MSI Holes API (`POST /api/upload`); otvet zapisyvaetsya v `genplan.uploaded_photo`. Posle uspekha fayl peremeshchaetsya v `photo_uploaded/`. Zapusk: `--run genplan_upload` ili tsepochka `--run genplan_upload_pipeline` (upload → `genplan_fetch_uploaded` → import).
+
+`genplan_fetch_uploaded` — po UUID iz `genplan.uploaded_photo` zabiraet meta iz MSI Holes (`GET /api/photos/meta/{uuid}`) i upsert v `genplan.photo_meta`. Ruchnoy zapusk: `--run genplan_fetch_uploaded`.
 
 Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
 
@@ -172,6 +174,7 @@ docker compose exec collector python -m collector.scheduler --run lens_sync
 docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
 docker compose exec collector python -m collector.scheduler --run genplan_pipeline
 docker compose exec collector python -m collector.scheduler --run genplan_fetch
+docker compose exec collector python -m collector.scheduler --run genplan_fetch_uploaded
 docker compose exec collector python -m collector.scheduler --run genplan
 docker compose exec collector python -m collector.scheduler --run ogh_disruption
 docker compose exec collector python -m collector.scheduler --run vector_stroy_url_222
@@ -275,9 +278,16 @@ Esli dannykh net — pole ne otpravlyaetsya v API i v BD zapisyvaetsya `NULL`.
 # Polozhit .jpg / .png v photo_to_upload/
 docker compose exec collector python -m collector.scheduler --run genplan_upload
 
-# Upload + poluchenie meta + import v BD
+# Tolko meta dlya uzhe otpravlennykh foto (UUID iz genplan.uploaded_photo)
+docker compose exec collector python -m collector.scheduler --run genplan_fetch_uploaded
+
+# Upload + poluchenie meta iz MSI Holes + import ostalnykh JSON
 docker compose exec collector python -m collector.scheduler --run genplan_upload_pipeline
 ```
+
+Tsepochka `genplan_upload_pipeline`: `genplan_upload` → `genplan_fetch_uploaded` → `genplan`. Meta dlya otpravlennykh foto beretsya po UUID iz `uploaded_photo`, a ne cherez `spatial_search` (`genplan_fetch`).
+
+Peremennaya `GENPLAN_FETCH_UPLOADED_LIMIT` (0 = bez limita) ogranicivaet chislo UUID za odin progon.
 
 Migratsiya tablitsy `genplan.uploaded_photo`:
 
@@ -291,6 +301,12 @@ Proverka:
 SELECT file_name, uuid, name, upload_at, lat, lng, azimuth_deg, loaded_at
 FROM genplan.uploaded_photo
 ORDER BY loaded_at DESC
+LIMIT 10;
+
+SELECT up.uuid, up.file_name, pm.status, pm.disruption, pm.loaded_at
+FROM genplan.uploaded_photo up
+LEFT JOIN genplan.photo_meta pm ON pm.uuid = up.uuid
+ORDER BY up.loaded_at DESC
 LIMIT 10;
 ```
 
@@ -381,7 +397,7 @@ LIMIT 5;
 
 SELECT job_name, status, message, started_at
 FROM collector.job_runs
-WHERE job_name IN ('genplan_upload', 'genplan_fetch', 'genplan')
+WHERE job_name IN ('genplan_upload', 'genplan_fetch_uploaded', 'genplan_fetch', 'genplan')
 ORDER BY started_at DESC
 LIMIT 10;
 ```
