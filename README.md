@@ -246,10 +246,10 @@ MSI_HOLES_BASE_URL=https://m2m.msi-holes.cxm.dev
 MSI_HOLES_TOKEN_ENDPOINT=https://id.cxm.dev/oauth2/token
 GENPLAN_SEARCH_LAT=55.7558
 GENPLAN_SEARCH_LNG=37.6173
-GENPLAN_SEARCH_RADIUS_M=1000
+GENPLAN_SEARCH_RADIUS_M=20000
 ```
 
-Po umolchaniyu poisk vypolnyaetsya v radius 1 km ot tsentra Moskvy. UUID, uzhe prisutstvuyushchie v `genplan.uuid_area` ili `genplan.photo_meta`, propuskayutsya.
+Po umolchaniyu poisk vypolnyaetsya v radius **20 km** ot tsentra Moskvy (`GENPLAN_SEARCH_RADIUS_M=20000`). Polnyy progon pri bolshom chisle UUID mozhet zanyat desyatki minut i dolshe; povtornyy `genplan_pipeline` dozagruzhaet tolko novye UUID.
 
 JSON-fayly v papke `jsons_genplan/` (v korne proekta, v Docker — `/app/jsons_genplan`). Tip opredelyaetsya po strukture, ne po imeni fayla:
 

@@ -75,7 +75,7 @@ docker compose ps
 Ожидаемые сервисы:
 
 - `monitor-db` — PostGIS (порт `5432` на всех интерфейсах VPS)
-- `monitor-collector` — планировщик ETL (03:00 / 04:00 / 05:00, Europe/Moscow)
+- `monitor-collector` — планировщик ETL (03:00 / 04:00 / 06:00 cron; genplan — ручной запуск)
 - `monitor-api` — M2M HTTP API приёма genplan photo meta (порт `8000`)
 
 ## 4. Перенос базы данных с локальной машины
@@ -293,6 +293,15 @@ WHERE uuid = '550e8400-e29b-41d4-a716-446655440000';
 |-------------|--------|----------|
 | 03:00 | `data_mos` | 8 экспортов data.mos.ru |
 | 04:00 | `lens_pipeline` | `lens_sync` + `stroymonitoring_sync` |
-| 05:00 | `genplan` | импорт `jsons_genplan/*.json` в `genplan.order`, `photo_meta`, `upload`, `uuid_area` (тип по структуре JSON) |
+| 06:00 | `vector_stroy_url_222` | upsert GeoJSON `url_222_wgs.geojson` |
+
+`genplan_pipeline` (`genplan_fetch` + import) — **только ручной** запуск:
+
+```bash
+# В .env: GENPLAN_SEARCH_RADIUS_M=20000, GENPLAN_FETCH_META_LIMIT=0, MSI_HOLES_*
+docker compose exec collector python -m collector.scheduler --run genplan_pipeline
+```
+
+Полный прогон при ~20k UUID может занять **час и более** (последовательные запросы meta).
 
 Подробнее о сервисах и таблицах — в [README.md](README.md).

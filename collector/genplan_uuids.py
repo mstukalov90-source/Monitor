@@ -43,6 +43,51 @@ def _uploaded_photo_uuid_expr(cur: Cursor, alias: str = "up") -> str:
     return "NULL"
 
 
+def load_genplan_uuids_with_meta(cur: Cursor) -> set[str]:
+    """UUIDs that already have photo_meta or uploaded_photo — skip meta re-fetch."""
+    known: set[str] = set()
+
+    if _table_has_column(cur, "genplan", "photo_meta", "uuid"):
+        cur.execute(
+            """
+            SELECT uuid FROM genplan.photo_meta
+            WHERE uuid IS NOT NULL AND btrim(uuid) <> ''
+            """
+        )
+        known.update(row[0] for row in cur.fetchall())
+
+    if _table_has_column(cur, "genplan", "uploaded_photo", "uuid"):
+        cur.execute(
+            """
+            SELECT uuid FROM genplan.uploaded_photo
+            WHERE uuid IS NOT NULL AND btrim(uuid) <> ''
+            """
+        )
+        known.update(row[0] for row in cur.fetchall())
+
+    if _table_has_column(cur, "genplan", "uploaded_photo", "photo_uuid"):
+        cur.execute(
+            """
+            SELECT photo_uuid FROM genplan.uploaded_photo
+            WHERE photo_uuid IS NOT NULL AND btrim(photo_uuid) <> ''
+            """
+        )
+        known.update(row[0] for row in cur.fetchall())
+
+    return known
+
+
+def load_genplan_uuid_area_uuids(cur: Cursor) -> set[str]:
+    """UUIDs already recorded in genplan.uuid_area."""
+    cur.execute(
+        """
+        SELECT uuid FROM genplan.uuid_area
+        WHERE uuid IS NOT NULL AND btrim(uuid) <> ''
+        """
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
 def load_known_genplan_uuids(cur: Cursor) -> set[str]:
     """Return UUIDs already stored in genplan uuid/photo tables."""
     known: set[str] = set()

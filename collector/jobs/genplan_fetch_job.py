@@ -22,7 +22,10 @@ from collector.config import (
     MSI_HOLES_TOKEN_ENDPOINT,
 )
 from collector.db import local_connection, log_job_run
-from collector.genplan_uuids import load_known_genplan_uuids
+from collector.genplan_uuids import (
+    load_genplan_uuid_area_uuids,
+    load_genplan_uuids_with_meta,
+)
 from collector.msi_holes_client import MsiHolesClient
 
 logger = logging.getLogger(__name__)
@@ -98,10 +101,12 @@ def run() -> None:
 
     with local_connection() as conn:
         with conn.cursor() as cur:
-            known_uuids = load_known_genplan_uuids(cur)
+            known_with_meta = load_genplan_uuids_with_meta(cur)
+            known_uuid_area = load_genplan_uuid_area_uuids(cur)
 
     total_uuids = 0
-    new_uuids: list[str] = []
+    pending_meta: list[str] = []
+    new_uuid_area: list[str] = []
     fetch_uuids: list[str] = []
     meta_saved = 0
     meta_errors: list[str] = []
@@ -116,19 +121,21 @@ def run() -> None:
         ) as api:
             all_uuids = _spatial_search(api)
             total_uuids = len(all_uuids)
-            new_uuids = [u for u in all_uuids if u not in known_uuids]
+            pending_meta = [u for u in all_uuids if u not in known_with_meta]
+            new_uuid_area = [u for u in pending_meta if u not in known_uuid_area]
 
             logger.info(
-                "spatial_search: %s total uuid(s), %s new, %s already known",
+                "spatial_search: %s total uuid(s), %s pending meta, %s new uuid_area, %s with meta",
                 total_uuids,
-                len(new_uuids),
-                total_uuids - len(new_uuids),
+                len(pending_meta),
+                len(new_uuid_area),
+                total_uuids - len(pending_meta),
             )
 
-            if not new_uuids:
+            if not pending_meta:
                 message = (
-                    f"spatial_search returned {total_uuids} uuid(s), 0 new; "
-                    "nothing to fetch"
+                    f"spatial_search returned {total_uuids} uuid(s), "
+                    "0 pending meta; nothing to fetch"
                 )
                 with local_connection() as conn:
                     log_job_run(
@@ -142,20 +149,24 @@ def run() -> None:
                 logger.info("genplan_fetch finished: %s", message)
                 return
 
-            fetch_uuids = new_uuids
+            fetch_uuids = pending_meta
             if GENPLAN_FETCH_META_LIMIT > 0:
-                fetch_uuids = new_uuids[:GENPLAN_FETCH_META_LIMIT]
+                fetch_uuids = pending_meta[:GENPLAN_FETCH_META_LIMIT]
                 logger.info(
-                    "GENPLAN_FETCH_META_LIMIT=%s: processing %s of %s new uuid(s)",
+                    "GENPLAN_FETCH_META_LIMIT=%s: processing %s of %s pending uuid(s)",
                     GENPLAN_FETCH_META_LIMIT,
                     len(fetch_uuids),
-                    len(new_uuids),
+                    len(pending_meta),
                 )
 
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            uuid_area_path = genplan_dir / f"uuid_area_{stamp}.json"
-            _write_json(uuid_area_path, {"uuids": fetch_uuids})
-            logger.info("Wrote %s (%s uuid(s))", uuid_area_path.name, len(fetch_uuids))
+            uuids_for_area_file = [u for u in fetch_uuids if u not in known_uuid_area]
+            if uuids_for_area_file:
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                uuid_area_path = genplan_dir / f"uuid_area_{stamp}.json"
+                _write_json(uuid_area_path, {"uuids": uuids_for_area_file})
+                logger.info(
+                    "Wrote %s (%s uuid(s))", uuid_area_path.name, len(uuids_for_area_file)
+                )
 
             for uuid in fetch_uuids:
                 try:
@@ -181,10 +192,10 @@ def run() -> None:
             )
         raise
 
-    processed = len(fetch_uuids) if new_uuids else 0
+    processed = len(fetch_uuids) if pending_meta else 0
     if meta_saved == 0:
         message = (
-            f"spatial_search: {total_uuids} total, {len(new_uuids)} new, "
+            f"spatial_search: {total_uuids} total, {len(pending_meta)} pending meta, "
             f"{processed} processed; 0 meta saved, {len(meta_errors)} error(s)"
         )
         with local_connection() as conn:
@@ -192,7 +203,7 @@ def run() -> None:
         raise RuntimeError(message)
 
     message_parts = [
-        f"spatial_search: {total_uuids} total, {len(new_uuids)} new",
+        f"spatial_search: {total_uuids} total, {len(pending_meta)} pending meta",
         f"{meta_saved} meta file(s) written",
     ]
     if meta_errors:
