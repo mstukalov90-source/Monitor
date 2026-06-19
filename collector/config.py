@@ -63,6 +63,12 @@ MONITOR_API_PORT = int(os.getenv("MONITOR_API_PORT", "8000"))
 MONITOR_API_PUBLIC_BASE_URL = os.getenv(
     "MONITOR_API_PUBLIC_BASE_URL", "http://77.222.63.161:8000"
 )
+MGGT_FIELD_PHOTO_DIR = Path(
+    os.getenv("MGGT_FIELD_PHOTO_DIR", str(PROJECT_DIR / "mggtfield_photo"))
+)
+MGGT_FIELD_PHOTO_MAX_BYTES = int(
+    os.getenv("MGGT_FIELD_PHOTO_MAX_BYTES", str(20 * 1024 * 1024))
+)
 
 
 def _monitor_api_keys() -> frozenset[str]:

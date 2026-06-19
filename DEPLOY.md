@@ -45,6 +45,8 @@ nano .env   # или другой редактор
 - `MONITOR_API_KEY` — 256-битный API-ключ для M2M-приёма photo meta (64 hex-символа)
 - `MONITOR_API_PUBLIC_BASE_URL` — публичный адрес API для коллег (без домена: `http://<IP_VPS>:8000`)
 - `MONITOR_API_PORT` — порт на хосте (по умолчанию `8000`)
+- `MGGT_FIELD_PHOTO_DIR` — каталог для полевых фото (по умолчанию `/app/mggtfield_photo` → `/opt/monitor/mggtfield_photo` на VPS)
+- `MGGT_FIELD_PHOTO_MAX_BYTES` — лимит размера загрузки (по умолчанию `20971520`, 20 MiB)
 
 Сгенерировать ключ:
 
@@ -286,6 +288,49 @@ WHERE uuid = '550e8400-e29b-41d4-a716-446655440000';
 - HTTPS не настроен (доступ по голому IP)
 - `GET` для чтения meta не реализован — endpoint только **принимает** данные
 - Nightly `genplan_fetch` может работать параллельно как резервный канал
+
+## 10. Загрузка полевых фотографий (Android)
+
+Мобильное приложение отправляет JPEG/PNG через `POST /api/mggtfield/photos` (`multipart/form-data`, поле `file`). Файлы сохраняются на диск в `/opt/monitor/mggtfield_photo/` (в контейнере — `/app/mggtfield_photo/`).
+
+Документация для Android-разработчика: [`mggtfield-photo-api-doc.md`](mggtfield-photo-api-doc.md)
+
+### 10.1 Чеклист деплоя
+
+- [ ] Код на VPS актуален (`git pull`)
+- [ ] Сервис `api` пересобран: `docker compose up -d --build api`
+- [ ] Каталог для фото существует и доступен для записи контейнером:
+
+```bash
+mkdir -p /opt/monitor/mggtfield_photo
+chmod 755 /opt/monitor/mggtfield_photo
+```
+
+- [ ] В `.env` задан `MONITOR_API_KEY` (тот же ключ, что для photo meta)
+- [ ] Порт `8000` открыт для IP разработчиков мобильного приложения
+
+### 10.2 Проверка после деплоя
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST \
+  "http://77.222.63.161:8000/api/mggtfield/photos" \
+  -H "Authorization: Bearer $MONITOR_API_KEY" \
+  -H "Accept: application/json" \
+  -F "file=@/path/to/test.jpg;type=image/jpeg;filename=test_upload.jpg"
+# ожидается: HTTP 201, JSON с saved_as, size_bytes, content_type
+
+ls -la /opt/monitor/mggtfield_photo/
+```
+
+### 10.3 Что передать Android-разработчику
+
+| Параметр | Значение |
+|----------|----------|
+| Base URL | `http://77.222.63.161:8000` |
+| Метод | `POST /api/mggtfield/photos` |
+| Auth | `Authorization: Bearer <MONITOR_API_KEY>` |
+| Формат | `multipart/form-data`, поле `file` |
+| Документация | `mggtfield-photo-api-doc.md` (примеры OkHttp / Retrofit) |
 
 ## Расписание задач
 

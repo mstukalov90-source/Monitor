@@ -26,3 +26,9 @@ class PhotoMetaPayload(BaseModel):
 class PhotoMetaResponse(BaseModel):
     uuid: str
     result: Literal["created", "updated"]
+
+
+class FieldPhotoUploadResponse(BaseModel):
+    saved_as: str
+    size_bytes: int
+    content_type: str
