@@ -5,6 +5,19 @@ from __future__ import annotations
 from psycopg2.extensions import cursor as Cursor
 
 
+def _table_exists(cur: Cursor, schema: str, table: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = %s AND table_name = %s
+        LIMIT 1
+        """,
+        (schema, table),
+    )
+    return cur.fetchone() is not None
+
+
 def _table_has_column(cur: Cursor, schema: str, table: str, column: str) -> bool:
     cur.execute(
         """
@@ -99,6 +112,15 @@ def load_known_genplan_uuids(cur: Cursor) -> set[str]:
         """
     )
     known.update(row[0] for row in cur.fetchall())
+
+    if _table_exists(cur, "genplan", "uuid_api"):
+        cur.execute(
+            """
+            SELECT uuid FROM genplan.uuid_api
+            WHERE uuid IS NOT NULL AND btrim(uuid) <> ''
+            """
+        )
+        known.update(row[0] for row in cur.fetchall())
 
     if _table_has_column(cur, "genplan", "photo_meta", "uuid"):
         cur.execute(

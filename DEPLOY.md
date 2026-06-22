@@ -197,20 +197,25 @@ docker compose ps
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_uuid_api.sql
 ```
 
-При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`, `sql/10_genplan_multi_tables.sql`, `sql/15_genplan_photo_meta_uuid.sql`).
+При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`, `sql/10_genplan_multi_tables.sql`, `sql/15_genplan_photo_meta_uuid.sql`, `sql/17_genplan_uuid_api.sql`).
 
-## 9. Genplan M2M API (приём photo meta)
+## 9. Genplan M2M API (приём photo meta и uuid)
 
-Коллеги отправляют JSON метаданных фотографий на MONITOR в push-режиме (`PUT /api/photos/meta/{uuid}`). Данные сохраняются в `genplan.photo_meta` с upsert по `uuid`.
+Коллеги отправляют данные на MONITOR в push-режиме:
+
+- `PUT /api/photos/meta/{uuid}` — JSON meta → `genplan.photo_meta` (upsert)
+- `PUT /api/uuids/{uuid}` — только uuid → `genplan.uuid_api` (insert-only, дубликат → 409)
 
 Домен не используется — доступ по IP VPS, например `http://77.222.63.161:8000`. Протокол HTTP (без TLS).
 
 Документация для коллег:
 
 - `genplan api/ONBOARDING.md` — быстрый старт
-- `genplan api/monitor-api-doc.md` — контракт API
+- `genplan api/monitor-api-doc.md` — контракт photo meta
+- `genplan api/monitor-uuid-api-doc.md` — контракт uuid
 - `genplan api/monitor_client.py` — пример Python-клиента
 
 ### 9.1 Чеклист деплоя API
@@ -219,6 +224,7 @@ docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta
 - [ ] В `.env` задан `MONITOR_API_KEY` (без него API отвечает `503`)
 - [ ] В `.env` задан `MONITOR_API_PUBLIC_BASE_URL=http://<IP_VPS>:8000`
 - [ ] Применена миграция `sql/15_genplan_photo_meta_uuid.sql` (обязательно на **существующей** БД; на новой — подхватывается initdb)
+- [ ] Применена миграция `sql/17_genplan_uuid_api.sql`
 - [ ] Запущен сервис `api`: `docker compose up -d --build api`
 - [ ] Порт `8000` открыт в firewall **только для IP коллег**
 - [ ] Проверены `health` и тестовый `PUT`
@@ -230,6 +236,7 @@ cd /opt/monitor
 
 # миграция (если БД уже была до появления API)
 docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_uuid_api.sql
 
 # поднять API (или весь стек)
 docker compose up -d --build api
@@ -270,6 +277,19 @@ SELECT uuid, status, lat, lng, loaded_at
 FROM genplan.photo_meta
 WHERE uuid = '550e8400-e29b-41d4-a716-446655440000';
 "
+
+# uuid-only endpoint
+curl -s -w "\nHTTP %{http_code}\n" -X PUT \
+  "http://77.222.63.161:8000/api/uuids/8d4c7a74-6c6f-4e53-a93d-9a6a7d5f2f21" \
+  -H "Authorization: Bearer $MONITOR_API_KEY" \
+  -H "Accept: application/json"
+# первая отправка: HTTP 201, повторная: HTTP 409
+
+docker compose exec -T db psql -U monitor -d monitor -c "
+SELECT file_name, uuid, loaded_at
+FROM genplan.uuid_api
+WHERE uuid = '8d4c7a74-6c6f-4e53-a93d-9a6a7d5f2f21';
+"
 ```
 
 ### 9.5 Что передать коллегам
@@ -277,16 +297,17 @@ WHERE uuid = '550e8400-e29b-41d4-a716-446655440000';
 | Параметр | Значение |
 |----------|----------|
 | Base URL | `http://77.222.63.161:8000` |
-| Метод | `PUT /api/photos/meta/{uuid}` |
 | Auth | `Authorization: Bearer <MONITOR_API_KEY>` |
-| Формат тела | JSON как в `genplan api/monitor-api-doc.md` |
+| UUID only | `PUT /api/uuids/{uuid}` — без тела |
+| Photo meta | `PUT /api/photos/meta/{uuid}` — JSON как в `genplan api/monitor-api-doc.md` |
 
 Передаётся **только JSON meta**, не файл изображения.
 
 ### 9.6 Ограничения
 
 - HTTPS не настроен (доступ по голому IP)
-- `GET` для чтения meta не реализован — endpoint только **принимает** данные
+- `GET` для чтения не реализован — endpoint'ы только **принимают** данные
+- `PUT /api/uuids/{uuid}` — insert-only; дубликат uuid → 409, без обновления
 - Nightly `genplan_fetch` может работать параллельно как резервный канал
 
 ## 10. Загрузка полевых фотографий (Android)

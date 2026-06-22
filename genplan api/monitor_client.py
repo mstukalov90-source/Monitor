@@ -51,6 +51,13 @@ class MonitorClient:
             headers={"Accept": "application/json"},
         )
 
+    def put_uuid(self, uuid: str) -> httpx.Response:
+        """PUT /api/uuids/{uuid} — register photo uuid (insert-only)."""
+        return self._http.put(
+            f"/api/uuids/{uuid}",
+            headers={"Accept": "application/json"},
+        )
+
     def health(self) -> httpx.Response:
         return self._http.get("/health")
 

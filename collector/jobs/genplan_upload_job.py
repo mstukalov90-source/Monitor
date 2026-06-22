@@ -16,6 +16,7 @@ from collector.config import (
     MSI_HOLES_CLIENT_SECRET,
     MSI_HOLES_CREDENTIALS_FILE,
     MSI_HOLES_TOKEN_ENDPOINT,
+    MSI_HOLES_VERIFY_SSL,
 )
 from collector.db import local_connection, log_job_run
 from collector.genplan_photo_exif import (
@@ -121,6 +122,7 @@ def run() -> None:
             base_url=MSI_HOLES_BASE_URL,
             token_endpoint=MSI_HOLES_TOKEN_ENDPOINT,
             timeout=120.0,
+            verify=MSI_HOLES_VERIFY_SSL,
         ) as api:
             for path in pending:
                 try:

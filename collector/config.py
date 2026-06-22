@@ -47,6 +47,16 @@ def _msi_holes_settings() -> tuple[str, str, str, str]:
 MSI_HOLES_CLIENT_ID, MSI_HOLES_CLIENT_SECRET, MSI_HOLES_BASE_URL, MSI_HOLES_TOKEN_ENDPOINT = (
     _msi_holes_settings()
 )
+
+
+def _env_bool(name: str, *, default: bool = True) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes")
+
+
+MSI_HOLES_VERIFY_SSL = _env_bool("MSI_HOLES_VERIFY_SSL", default=True)
 GENPLAN_SEARCH_LAT = float(os.getenv("GENPLAN_SEARCH_LAT", "55.7558"))
 GENPLAN_SEARCH_LNG = float(os.getenv("GENPLAN_SEARCH_LNG", "37.6173"))
 GENPLAN_SEARCH_RADIUS_M = int(os.getenv("GENPLAN_SEARCH_RADIUS_M", "1000"))

@@ -1,6 +1,33 @@
-# Инструкция для коллег — отправка метаданных фотографий в MONITOR
+# Инструкция для коллег — M2M API MONITOR (genplan)
 
-## Назначение
+Два endpoint'а с одним API-ключом:
+
+| Endpoint | Данные | Документация |
+|----------|--------|--------------|
+| `PUT /api/uuids/{uuid}` | только uuid | [`monitor-uuid-api-doc.md`](monitor-uuid-api-doc.md) |
+| `PUT /api/photos/meta/{uuid}` | JSON meta | [`monitor-api-doc.md`](monitor-api-doc.md) |
+
+---
+
+## Передача UUID (только идентификатор)
+
+Регистрация uuid снимка в `genplan.uuid_api`. Тело запроса не нужно.
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X PUT \
+  "$MONITOR_BASE_URL/api/uuids/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer $MONITOR_API_KEY" \
+  -H "Accept: application/json"
+```
+
+- `201` — uuid записан
+- `409` — uuid уже существует (повтор не обновляет запись)
+
+Python: `api.put_uuid("550e8400-e29b-41d4-a716-446655440000")`
+
+---
+
+## Передача метаданных фотографии
 
 MONITOR принимает JSON с метаданными анализа фотографий **в push-режиме**: вы отправляете данные сразу после готовности, без ожидания нашего nightly-запроса.
 
@@ -107,7 +134,8 @@ with MonitorClient(
 | 422 | Невалидные типы полей |
 | 503 | Связаться с администратором MONITOR |
 
-Полный контракт: [`monitor-api-doc.md`](monitor-api-doc.md)
+Полный контракт meta: [`monitor-api-doc.md`](monitor-api-doc.md)  
+Полный контракт uuid: [`monitor-uuid-api-doc.md`](monitor-uuid-api-doc.md)
 
 ## Отличие от MSI Holes API
 

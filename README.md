@@ -332,13 +332,16 @@ Kollegam peredat Base URL `http://77.222.63.161:8000` i vydannyj API-klyuch. Otk
 
 Endpoint: `PUT /api/photos/meta/{uuid}`, zagolovok `Authorization: Bearer <MONITOR_API_KEY>`.
 
-Dokumentatsiya dlya kolleg: `genplan api/ONBOARDING.md`, `genplan api/monitor-api-doc.md`, primer klienta `genplan api/monitor_client.py`.
+Endpoint UUID (tolko identifikator): `PUT /api/uuids/{uuid}` → `genplan.uuid_api` (insert-only, dublikat → 409).
+
+Dokumentatsiya dlya kolleg: `genplan api/ONBOARDING.md`, `genplan api/monitor-api-doc.md`, `genplan api/monitor-uuid-api-doc.md`, primer klienta `genplan api/monitor_client.py`.
 
 Migratsiya uuid dlya sushchestvuyushchey BD:
 
 ```bash
 docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/16_genplan_uploaded_photo.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_uuid_api.sql
 ```
 
 ## SSH tunnel to DB

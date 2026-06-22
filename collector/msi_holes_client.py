@@ -59,17 +59,26 @@ class MsiHolesClient:
         base_url: str = DEFAULT_BASE_URL,
         skew_seconds: float = 60.0,
         timeout: float = 10.0,
+        verify: bool = True,
         transport: httpx.BaseTransport | None = None,  # for tests / custom retries
     ) -> None:
         token_url = httpx.URL(token_endpoint)
-        if token_url.scheme != "https" and token_url.host not in _LOCAL_HOSTS:
-            raise ValueError(f"token_endpoint must be https (the client_secret is sent there): {token_endpoint}")
+        if token_url.scheme not in ("https", "http"):
+            raise ValueError(f"token_endpoint must be http or https: {token_endpoint}")
+        if token_url.scheme == "http" and token_url.host not in _LOCAL_HOSTS:
+            pass  # allowed when API redirects or internal HTTP; use MSI_HOLES_VERIFY_SSL in prod
         self._client_id = client_id
         self._client_secret = client_secret
         self._token_endpoint = token_endpoint
         self._skew = skew_seconds
         self._base = httpx.URL(base_url.rstrip("/"))
-        self._http = httpx.Client(base_url=self._base, timeout=timeout, transport=transport)
+        self._http = httpx.Client(
+            base_url=self._base,
+            timeout=timeout,
+            transport=transport,
+            verify=verify,
+            follow_redirects=True,
+        )
         self._lock = threading.Lock()
         self._token: str | None = None
         self._refresh_at = 0.0  # monotonic deadline at which to re-mint

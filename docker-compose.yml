@@ -24,6 +24,7 @@ services:
       - ./sql/14_lens_stroymonitoring_purge_functions.sql:/docker-entrypoint-initdb.d/10-lens-stroymonitoring-purge-functions.sql:ro
       - ./sql/15_genplan_photo_meta_uuid.sql:/docker-entrypoint-initdb.d/11-genplan-photo-meta-uuid.sql:ro
       - ./sql/16_genplan_uploaded_photo.sql:/docker-entrypoint-initdb.d/12-genplan-uploaded-photo.sql:ro
+      - ./sql/17_genplan_uuid_api.sql:/docker-entrypoint-initdb.d/13-genplan-uuid-api.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s
@@ -61,6 +62,7 @@ services:
       MSI_HOLES_CLIENT_SECRET: ${MSI_HOLES_CLIENT_SECRET:-}
       MSI_HOLES_BASE_URL: ${MSI_HOLES_BASE_URL:-https://m2m.msi-holes.cxm.dev}
       MSI_HOLES_TOKEN_ENDPOINT: ${MSI_HOLES_TOKEN_ENDPOINT:-https://id.cxm.dev/oauth2/token}
+      MSI_HOLES_VERIFY_SSL: ${MSI_HOLES_VERIFY_SSL:-true}
       GENPLAN_SEARCH_LAT: ${GENPLAN_SEARCH_LAT:-55.7558}
       GENPLAN_SEARCH_LNG: ${GENPLAN_SEARCH_LNG:-37.6173}
       GENPLAN_SEARCH_RADIUS_M: ${GENPLAN_SEARCH_RADIUS_M:-1000}
