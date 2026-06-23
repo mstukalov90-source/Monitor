@@ -67,7 +67,17 @@ GENPLAN_FETCH_UPLOADED_LIMIT = int(os.getenv("GENPLAN_FETCH_UPLOADED_LIMIT", "0"
 GENPLAN_PHOTO_UPLOAD_DIR = PROJECT_DIR / "photo_to_upload"
 GENPLAN_PHOTO_UPLOADED_DIR = PROJECT_DIR / "photo_uploaded"
 GENPLAN_DOWNLOAD_DIR = PROJECT_DIR / "downloaded_photo"
-GENPLAN_DOWNLOAD_HOOD_GID = int(os.getenv("GENPLAN_DOWNLOAD_HOOD_GID", "62"))
+
+
+def _parse_int_list(raw: str, *, default: str) -> tuple[int, ...]:
+    value = raw.strip() or default
+    return tuple(int(part.strip()) for part in value.split(",") if part.strip())
+
+
+GENPLAN_DOWNLOAD_HOOD_GIDS = _parse_int_list(
+    os.getenv("GENPLAN_DOWNLOAD_HOOD_GIDS", ""),
+    default=os.getenv("GENPLAN_DOWNLOAD_HOOD_GID", "62,20,124"),
+)
 
 MONITOR_API_PORT = int(os.getenv("MONITOR_API_PORT", "8000"))
 MONITOR_API_PUBLIC_BASE_URL = os.getenv(

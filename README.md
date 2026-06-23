@@ -289,6 +289,34 @@ Tsepochka `genplan_upload_pipeline`: `genplan_upload` → `genplan_fetch_uploade
 
 Peremennaya `GENPLAN_FETCH_UPLOADED_LIMIT` (0 = bez limita) ogranicivaet chislo UUID za odin progon.
 
+### Skachivanie fotografiy po disruption i hood (`downloaded_photo/`)
+
+Ruchnoy job `genplan_download` vybiraet iz `genplan.photo_meta` snimki s `disruption = true`, popadayushchie vnutr poligona `odh_export.hood` (po umolchaniyu `gid` 62, 20 i 124), i skachivaet JPEG/PNG iz MSI Holes API v `downloaded_photo/`. Uzhe sushchestvuyushchie fayly propuskayutsya.
+
+Predprosmotr v BD:
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_disruption_in_hood.sql
+```
+
+Zapusk:
+
+```bash
+docker compose exec collector python -m collector.scheduler --run genplan_download
+```
+
+Peremennaya okruzheniya:
+
+```
+GENPLAN_DOWNLOAD_HOOD_GIDS=62,20,124
+```
+
+Skachivanie na lokalnuyu mashinu s VPS:
+
+```bash
+rsync -avz -e "ssh -i <key>" root@<vps>:/opt/monitor/downloaded_photo/ ./downloaded_photo/
+```
+
 Migratsiya tablitsy `genplan.uploaded_photo`:
 
 ```bash

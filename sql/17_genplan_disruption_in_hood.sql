@@ -1,5 +1,5 @@
--- Genplan photos with disruption=true inside odh_export.hood polygon.
--- Default hood gid=62; change the literal in both queries if needed.
+-- Genplan photos with disruption=true inside odh_export.hood polygons.
+-- Default hood gids: 62, 20 and 124.
 --
 -- Verify hood schema before first run:
 --   SELECT column_name, udt_name
@@ -7,19 +7,22 @@
 --   WHERE table_schema = 'odh_export' AND table_name = 'hood'
 --   ORDER BY ordinal_position;
 --
---   SELECT gid, ST_GeometryType(geom), ST_IsValid(geom)
+--   SELECT gid, rayon, okrug, ST_GeometryType(geom) AS gtype, ST_IsValid(geom) AS valid
 --   FROM odh_export.hood
---   WHERE gid = 62;
+--   WHERE gid IN (62, 20, 124);
 
 -- Preview count
 SELECT count(*) AS matched
 FROM genplan.photo_meta pm
-JOIN odh_export.hood h ON h.gid = 62
 WHERE pm.disruption IS TRUE
   AND pm.uuid IS NOT NULL
   AND btrim(pm.uuid) <> ''
   AND pm.geom IS NOT NULL
-  AND ST_Within(pm.geom, h.geom);
+  AND EXISTS (
+    SELECT 1 FROM odh_export.hood h
+    WHERE h.gid IN (62, 20, 124)
+      AND ST_Within(pm.geom, h.geom)
+  );
 
 -- List matching photos (uuid for download)
 SELECT
@@ -30,10 +33,13 @@ SELECT
     pm.disruption,
     pm.loaded_at
 FROM genplan.photo_meta pm
-JOIN odh_export.hood h ON h.gid = 62
 WHERE pm.disruption IS TRUE
   AND pm.uuid IS NOT NULL
   AND btrim(pm.uuid) <> ''
   AND pm.geom IS NOT NULL
-  AND ST_Within(pm.geom, h.geom)
+  AND EXISTS (
+    SELECT 1 FROM odh_export.hood h
+    WHERE h.gid IN (62, 20, 124)
+      AND ST_Within(pm.geom, h.geom)
+  )
 ORDER BY pm.loaded_at DESC;

@@ -12,7 +12,7 @@ from psycopg2.extras import RealDictCursor
 
 from collector.config import (
     GENPLAN_DOWNLOAD_DIR,
-    GENPLAN_DOWNLOAD_HOOD_GID,
+    GENPLAN_DOWNLOAD_HOOD_GIDS,
     MSI_HOLES_BASE_URL,
     MSI_HOLES_CLIENT_ID,
     MSI_HOLES_CLIENT_SECRET,
@@ -32,12 +32,15 @@ SELECT
     pm.uuid,
     pm.image_name
 FROM genplan.photo_meta pm
-JOIN odh_export.hood h ON h.gid = %(hood_gid)s
 WHERE pm.disruption IS TRUE
   AND pm.uuid IS NOT NULL
   AND btrim(pm.uuid) <> ''
   AND pm.geom IS NOT NULL
-  AND ST_Within(pm.geom, h.geom)
+  AND EXISTS (
+    SELECT 1 FROM odh_export.hood h
+    WHERE h.gid = ANY(%(hood_gids)s)
+      AND ST_Within(pm.geom, h.geom)
+  )
 ORDER BY pm.loaded_at DESC
 """
 
@@ -52,10 +55,10 @@ def _require_credentials() -> None:
         )
 
 
-def _load_photo_rows(hood_gid: int) -> list[dict[str, Any]]:
+def _load_photo_rows(hood_gids: tuple[int, ...]) -> list[dict[str, Any]]:
     with local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(_PHOTO_ROWS_SQL, {"hood_gid": hood_gid})
+            cur.execute(_PHOTO_ROWS_SQL, {"hood_gids": list(hood_gids)})
             return list(cur.fetchall())
 
 
@@ -98,7 +101,7 @@ def _download_photo(api: MsiHolesClient, uuid: str, dest: Path) -> None:
 
 def run() -> None:
     _require_credentials()
-    hood_gid = GENPLAN_DOWNLOAD_HOOD_GID
+    hood_gids = GENPLAN_DOWNLOAD_HOOD_GIDS
     download_dir = GENPLAN_DOWNLOAD_DIR
     run_id = None
 
@@ -107,12 +110,12 @@ def run() -> None:
             conn,
             JOB_NAME,
             "running",
-            f"hood_gid={hood_gid} -> {download_dir.name}/",
+            f"hood_gids={list(hood_gids)} -> {download_dir.name}/",
         )
 
-    rows = _load_photo_rows(hood_gid)
+    rows = _load_photo_rows(hood_gids)
     if not rows:
-        message = f"0 photo(s) matched disruption=true in hood gid={hood_gid}"
+        message = f"0 photo(s) matched disruption=true in hood gids={list(hood_gids)}"
         with local_connection() as conn:
             log_job_run(
                 conn,

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 JOB_NAME = "genplan_fetch"
 
-API_SPATIAL_SEARCH = "/api/spatial_search"
+API_SPATIAL_SEARCH = "/spatial_search"
 API_PHOTOS_META = "/api/photos/meta/{uuid}"
 
 
