@@ -7,6 +7,7 @@ CREATE SCHEMA IF NOT EXISTS genplan;
 CREATE SCHEMA IF NOT EXISTS odh_export;
 
 -- ogh-disruption table shell: sql/11_odh_export_ogh_disruption.sql (mounted in docker-compose initdb)
+-- mggt_station tables: sql/20_mggt_station_tables.sql (mounted in docker-compose initdb)
 
 -- data.mos.ru export storage (flattened columns)
 CREATE TABLE IF NOT EXISTS data_mos.items (

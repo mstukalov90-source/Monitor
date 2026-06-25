@@ -25,6 +25,7 @@ services:
       - ./sql/15_genplan_photo_meta_uuid.sql:/docker-entrypoint-initdb.d/11-genplan-photo-meta-uuid.sql:ro
       - ./sql/16_genplan_uploaded_photo.sql:/docker-entrypoint-initdb.d/12-genplan-uploaded-photo.sql:ro
       - ./sql/17_genplan_uuid_api.sql:/docker-entrypoint-initdb.d/13-genplan-uuid-api.sql:ro
+      - ./sql/20_mggt_station_tables.sql:/docker-entrypoint-initdb.d/14-mggt-station-tables.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s
