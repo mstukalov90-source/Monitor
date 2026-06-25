@@ -1,8 +1,19 @@
 services:
   db:
-    image: postgis/postgis:16-3.4
+    build:
+      context: ./docker/postgres
+      dockerfile: Dockerfile
+    image: monitor-postgis:16-3.4-cron
     container_name: monitor-db
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_cron
+      - -c
+      - cron.database_name=monitor
+      - -c
+      - cron.timezone=Europe/Moscow
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-monitor}
       POSTGRES_USER: ${POSTGRES_USER:-monitor}
