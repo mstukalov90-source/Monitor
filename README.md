@@ -291,7 +291,7 @@ Peremennaya `GENPLAN_FETCH_UPLOADED_LIMIT` (0 = bez limita) ogranicivaet chislo 
 
 ### Skachivanie fotografiy po disruption i hood (`downloaded_photo/`)
 
-Ruchnoy job `genplan_download` vybiraet iz `genplan.photo_meta` snimki s `disruption = true`, popadayushchie vnutr poligona `odh_export.hood` (po umolchaniyu `gid` 62, 20 i 124), i skachivaet JPEG/PNG iz MSI Holes API v `downloaded_photo/`. Uzhe sushchestvuyushchie fayly propuskayutsya.
+Ruchnoy job `genplan_download` vybiraet iz `genplan.photo_meta` snimki s `disruption = true`, popadayushchie vnutr poligona `odh_export.hood`, i skachivaet JPEG/PNG iz MSI Holes API v `downloaded_photo/`. Uzhe sushchestvuyushchie fayly propuskayutsya. Spisok `gid` nastraivaetsya cherez env (comma-separated).
 
 Predprosmotr v BD:
 
@@ -308,7 +308,7 @@ docker compose exec collector python -m collector.scheduler --run genplan_downlo
 Peremennaya okruzheniya:
 
 ```
-GENPLAN_DOWNLOAD_HOOD_GIDS=62,20,124
+GENPLAN_DOWNLOAD_HOOD_GIDS=20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124
 ```
 
 Skachivanie na lokalnuyu mashinu s VPS:

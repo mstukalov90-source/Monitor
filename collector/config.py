@@ -76,7 +76,10 @@ def _parse_int_list(raw: str, *, default: str) -> tuple[int, ...]:
 
 GENPLAN_DOWNLOAD_HOOD_GIDS = _parse_int_list(
     os.getenv("GENPLAN_DOWNLOAD_HOOD_GIDS", ""),
-    default=os.getenv("GENPLAN_DOWNLOAD_HOOD_GID", "62,20,124"),
+    default=os.getenv(
+        "GENPLAN_DOWNLOAD_HOOD_GID",
+        "20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124",
+    ),
 )
 
 MONITOR_API_PORT = int(os.getenv("MONITOR_API_PORT", "8000"))
