@@ -25,6 +25,11 @@ _MAX_COLUMN_LEN = 63
 def _scalar_value(value: Any) -> Any:
     if value is None:
         return None
+    try:
+        if pd.isna(value):
+            return None
+    except (ValueError, TypeError):
+        pass
     if isinstance(value, (list, dict, str, int, float, bool)):
         return value
     if isinstance(value, bytes):
@@ -140,6 +145,8 @@ def infer_column_type(values: list[Any]) -> str:
 
     if has_json:
         return "JSONB"
+    if has_other:
+        return "TEXT"
     if has_float or (has_int and has_other):
         return "DOUBLE PRECISION"
     if has_int and not has_other and not has_bool:
@@ -210,6 +217,11 @@ def ensure_columns(cur: Cursor, qualified_table: str, schema: dict[str, str]) ->
 def prepare_value(val: Any, pg_type: str) -> Any:
     if val is None:
         return None
+    try:
+        if pd.isna(val):
+            return None
+    except (ValueError, TypeError):
+        pass
     if pg_type == "JSONB":
         if isinstance(val, (list, dict)):
             return Json(val)

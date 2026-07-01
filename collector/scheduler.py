@@ -4,7 +4,7 @@ Scheduler for MONITOR data collector.
 Daily schedule (Europe/Moscow):
   03:00 — data_mos (all 8 exports sequentially), then ogh_disruption if mggt_dgn.geojson exists
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
-  06:00 — vector_stroy_url_222 GeoJSON upsert
+  06:00 — vector_stroy_url_222: fetch map221/rs_2022 + DROP + GeoJSON upsert
 
   genplan_pipeline (genplan_fetch + import) — manual only: --run genplan_pipeline
   genplan_upload — manual only: --run genplan_upload
@@ -123,7 +123,7 @@ def start_scheduler() -> None:
         vector_stroy_job.run,
         CronTrigger(hour=6, minute=0, timezone=TZ),
         id="vector_stroy_url_222",
-        name="Vector stroy url_222 GeoJSON upsert",
+        name="Vector stroy url_222 fetch + DROP + GeoJSON upsert",
         replace_existing=True,
     )
 

@@ -359,7 +359,9 @@ ls -la /opt/monitor/mggtfield_photo/
 |-------------|--------|----------|
 | 03:00 | `data_mos` | 8 экспортов data.mos.ru |
 | 04:00 | `lens_pipeline` | `lens_sync` + `stroymonitoring_sync` |
-| 06:00 | `vector_stroy_url_222` | upsert GeoJSON `url_222_wgs.geojson` |
+| 06:00 | `vector_stroy_url_222` | fetch map221/rs_2022 (token: `Vector_py/token.md`) → DROP + upsert `vector_stroy.url_222` |
+
+Токен vector.mka.mos.ru периодически меняется — обновляйте `Vector_py/token.md` на сервере (файл в `.gitignore`). Альтернатива: env `VECTOR_MKA_TOKEN`. SSL: `VECTOR_MKA_VERIFY_SSL=false` по умолчанию. VPS не видит vector.mka.mos.ru — fetch локально, затем scp `url_222_wgs.geojson` на сервер.
 
 `genplan_pipeline` (`genplan_fetch` + import) — **только ручной** запуск:
 

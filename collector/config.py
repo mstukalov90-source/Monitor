@@ -57,6 +57,8 @@ def _env_bool(name: str, *, default: bool = True) -> bool:
 
 
 MSI_HOLES_VERIFY_SSL = _env_bool("MSI_HOLES_VERIFY_SSL", default=True)
+VECTOR_MKA_TOKEN_FILE = PROJECT_DIR / "Vector_py" / "token.md"
+VECTOR_MKA_VERIFY_SSL = _env_bool("VECTOR_MKA_VERIFY_SSL", default=False)
 GENPLAN_SEARCH_LAT = float(os.getenv("GENPLAN_SEARCH_LAT", "55.7558"))
 GENPLAN_SEARCH_LNG = float(os.getenv("GENPLAN_SEARCH_LNG", "37.6173"))
 GENPLAN_SEARCH_RADIUS_M = int(os.getenv("GENPLAN_SEARCH_RADIUS_M", "1000"))

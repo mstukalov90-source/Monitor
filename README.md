@@ -8,7 +8,7 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 |-------|--------|----------|
 | 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
-| 06:00 | `vector_stroy_url_222` | Esli v korne proekta est `url_222_wgs.geojson` — upsert v `vector_stroy.url_222` po `uuid`, zatem udalenie fayla; inache propusk |
+| 06:00 | `vector_stroy_url_222` | Chitaet token iz `Vector_py/token.md`, skachivaet GeoJSON map221/rs_2022 s vector.mka.mos.ru, DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; pri otsutstvii tokena ili oshibke API — propusk |
 
 `genplan_pipeline` (`genplan_fetch` + import) — **tolko ruchnoy zapusk**: `--run genplan_pipeline`
 
