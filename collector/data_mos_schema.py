@@ -13,7 +13,7 @@ from psycopg2.extras import Json
 
 from collector.flatten import _parse_maybe_dict
 
-_RESERVED_COLUMNS = frozenset({"id", "geom", "loaded_at"})
+_RESERVED_COLUMNS = frozenset({"id", "geom", "loaded_at", "task_key"})
 _GEOMETRY_KEYS = frozenset({
     "geometry", "geom", "geodata", "geodata_center",
     "coordinates", "wkt", "geo_data", "geocenter",
@@ -273,3 +273,91 @@ def insert_feature(
         )
     else:
         cur.execute(f"INSERT INTO {qualified_table} DEFAULT VALUES")
+
+
+def _geom_hash_sql(geom_expr: str) -> str:
+    return f"md5(ST_AsEWKB(ST_SetSRID(ST_MakeValid({geom_expr}), 4326)))"
+
+
+def _find_existing_row_id(
+    cur: Cursor,
+    qualified_table: str,
+    props: dict[str, Any],
+    geom_json: Optional[str],
+) -> Optional[int]:
+    global_id = props.get("global_id")
+    if global_id is not None and geom_json:
+        cur.execute(
+            f"""
+            SELECT id FROM {qualified_table}
+            WHERE global_id = %s
+              AND {_geom_hash_sql("geom")} = {_geom_hash_sql("ST_GeomFromGeoJSON(%s)")}
+            LIMIT 1
+            """,
+            (global_id, geom_json),
+        )
+        row = cur.fetchone()
+        if row:
+            return int(row[0])
+    return None
+
+
+def update_feature(
+    cur: Cursor,
+    qualified_table: str,
+    schema: dict[str, str],
+    row_id: int,
+    props: dict[str, Any],
+    geom_json: Optional[str],
+) -> None:
+    cols = sorted(schema.keys())
+    if not cols and not geom_json:
+        return
+    sets = [f'"{col}" = %s' for col in cols]
+    params: list[Any] = [prepare_value(props.get(col), schema[col]) for col in cols]
+    if geom_json:
+        sets.append("geom = ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)")
+        params.append(geom_json)
+    params.append(row_id)
+    cur.execute(
+        f"UPDATE {qualified_table} SET {', '.join(sets)} WHERE id = %s",
+        params,
+    )
+
+
+def upsert_feature(
+    cur: Cursor,
+    qualified_table: str,
+    schema: dict[str, str],
+    props: dict[str, Any],
+    geom_json: Optional[str],
+) -> int:
+    """Insert or update row; preserve id when global_id+geom match."""
+    existing_id = _find_existing_row_id(cur, qualified_table, props, geom_json)
+    if existing_id is not None:
+        from collector.data_mos_tasked import is_parent_tasked
+
+        if is_parent_tasked(cur, qualified_table, existing_id):
+            return existing_id
+        update_feature(cur, qualified_table, schema, existing_id, props, geom_json)
+        return existing_id
+    cols = sorted(schema.keys())
+    values = {col: prepare_value(props.get(col), schema[col]) for col in cols}
+    if geom_json:
+        col_list = ", ".join(f'"{c}"' for c in cols) + ", geom"
+        placeholders = ", ".join(f"%({c})s" for c in cols) + ", ST_SetSRID(ST_GeomFromGeoJSON(%(geom)s), 4326)"
+        cur.execute(
+            f"INSERT INTO {qualified_table} ({col_list}) VALUES ({placeholders}) RETURNING id",
+            {**values, "geom": geom_json},
+        )
+    elif cols:
+        col_list = ", ".join(f'"{c}"' for c in cols)
+        placeholders = ", ".join(f"%({c})s" for c in cols)
+        cur.execute(
+            f"INSERT INTO {qualified_table} ({col_list}) VALUES ({placeholders}) RETURNING id",
+            values,
+        )
+    else:
+        cur.execute(f"INSERT INTO {qualified_table} DEFAULT VALUES RETURNING id")
+    row = cur.fetchone()
+    return int(row[0]) if row else 0

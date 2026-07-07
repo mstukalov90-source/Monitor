@@ -141,6 +141,7 @@ def _derive_from_geometry_collections(
         FROM {qualified_table}
         WHERE geom IS NOT NULL
           AND derived_from_id IS NULL
+          AND tasked IS NOT TRUE
           AND ST_GeometryType(geom) = 'ST_GeometryCollection'
         """
     )
@@ -199,6 +200,7 @@ def derive_polygons_from_lines(
         FROM {qualified_table}
         WHERE geom IS NOT NULL
           AND derived_from_id IS NULL
+          AND tasked IS NOT TRUE
           AND ST_GeometryType(geom) IN ('ST_LineString', 'ST_MultiLineString')
           AND NOT EXISTS (
               SELECT 1

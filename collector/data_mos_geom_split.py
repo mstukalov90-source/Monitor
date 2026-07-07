@@ -113,6 +113,14 @@ def _ensure_split_table(
         f"ALTER TABLE {target_qualified} "
         f"ADD COLUMN IF NOT EXISTS source_id BIGINT"
     )
+    cur.execute(
+        f"ALTER TABLE {target_qualified} "
+        f"ADD COLUMN IF NOT EXISTS task_key UUID REFERENCES crm.tasks(key) ON DELETE SET NULL"
+    )
+    cur.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{suffix}_uq_task_key "
+        f"ON {target_qualified} (task_key) WHERE task_key IS NOT NULL"
+    )
     if with_derived_from_id:
         cur.execute(
             f"ALTER TABLE {target_qualified} "
@@ -155,31 +163,35 @@ def _insert_routed(
     *,
     with_derived_from_id: bool = False,
 ) -> int:
-    valid_geom = _valid_geom_expr()
-    geom_filter = _valid_geom_filter()
+    valid_geom = _valid_geom_expr("src.geom")
+    geom_filter = _valid_geom_filter("src.geom")
     type_list = ", ".join(f"'{t}'" for t in geom_types)
 
     quoted_attrs = _quoted_attr_list(attr_cols)
     insert_attrs = f"{quoted_attrs}, " if attr_cols else ""
-    select_attrs = f"{quoted_attrs}, " if attr_cols else ""
+    select_attrs = (
+        ", ".join(f'src."{col}"' for col in attr_cols) + ", "
+        if attr_cols
+        else ""
+    )
 
-    geom_select = valid_geom
     if with_derived_from_id:
         extra_insert = "derived_from_id, source_id, "
-        extra_select = "derived_from_id, id AS source_id, "
+        extra_select = "src.derived_from_id, src.id AS source_id, "
     else:
         extra_insert = "source_id, "
-        extra_select = "id AS source_id, "
+        extra_select = "src.id AS source_id, "
 
     where_clause = (
         f"{geom_filter} AND ST_GeometryType({valid_geom}) IN ({type_list})"
+        f" AND src.tasked IS NOT TRUE"
     )
 
     cur.execute(
         f"""
         INSERT INTO {target_qualified} ({insert_attrs}geom, {extra_insert}loaded_at)
-        SELECT {select_attrs}{geom_select}, {extra_select}loaded_at
-        FROM {source_qualified}
+        SELECT {select_attrs}{valid_geom}, {extra_select}src.loaded_at
+        FROM {source_qualified} AS src
         WHERE {where_clause}
         """
     )
@@ -216,6 +228,7 @@ def _insert_routed_from_collection(
         FROM {source_qualified} AS src
         CROSS JOIN LATERAL ({lateral}) AS flat
         WHERE {_valid_geom_filter("src.geom")}
+          AND src.tasked IS NOT TRUE
           AND ST_GeometryType({_valid_geom_expr_for("src.geom")}) = '{_GEOMETRY_COLLECTION_TYPE}'
           AND NOT ST_IsEmpty({part_geom})
           AND ST_GeometryType({part_geom}) IN ({type_list})
@@ -301,12 +314,74 @@ def _count_skipped(cur: Any, source_qualified: str) -> int:
     return int(row[0]) if row else 0
 
 
+def _geom_hash_expr(geom_col: str = "geom") -> str:
+    return f"md5(ST_AsEWKB(ST_SetSRID(ST_MakeValid({geom_col}), 4326)))"
+
+
+def _save_task_key_links(cur: Any, target_qualified: str) -> list[tuple]:
+    cur.execute(
+        f"""
+        SELECT task_key, global_id, {_geom_hash_expr("geom")} AS geom_hash, id
+        FROM {target_qualified}
+        WHERE task_key IS NOT NULL
+        """
+    )
+    return list(cur.fetchall())
+
+
+def _restore_task_key_links(cur: Any, target_qualified: str, links: list[tuple]) -> int:
+    occupied_guard = f"""
+                  AND NOT EXISTS (
+                      SELECT 1 FROM {target_qualified} occupied
+                      WHERE occupied.task_key = %s
+                  )"""
+    restored = 0
+    for task_key, global_id, geom_hash, _old_id in links:
+        if global_id is not None and geom_hash:
+            cur.execute(
+                f"""
+                UPDATE {target_qualified}
+                SET task_key = %s
+                WHERE task_key IS NULL
+                  AND global_id = %s
+                  AND {_geom_hash_expr("geom")} = %s
+                {occupied_guard}
+                """,
+                (task_key, global_id, geom_hash, task_key),
+            )
+        else:
+            cur.execute(
+                f"""
+                UPDATE {target_qualified}
+                SET task_key = %s
+                WHERE id = %s AND task_key IS NULL
+                {occupied_guard}
+                """,
+                (task_key, _old_id, task_key),
+            )
+        if cur.rowcount == 0:
+            cur.execute(
+                f"SELECT 1 FROM {target_qualified} WHERE task_key = %s LIMIT 1",
+                (task_key,),
+            )
+            if cur.fetchone() is not None:
+                logger.warning(
+                    "Geom split %s: skip restore task_key %s (already occupied)",
+                    target_qualified,
+                    task_key,
+                )
+        restored += cur.rowcount
+    return restored
+
+
 def rebuild_geom_split(cur: Any, qualified_source: str) -> Optional[GeomSplitResult]:
     """
     Rebuild *_points, *_lines, *_polygons from items_* after derive_polygons_from_lines.
 
     Only routes geometries (ST_MakeValid on insert). Line-to-polygon is not repeated here.
     """
+    from collector.data_mos_tasked import tasked_child_delete_guard
+
     table = _table_name(qualified_source)
     if table not in SPLIT_SOURCE_TABLES:
         return None
@@ -322,8 +397,24 @@ def rebuild_geom_split(cur: Any, qualified_source: str) -> Optional[GeomSplitRes
 
     attr_cols, _ = attribute_columns(cur, source_schema, table)
 
+    cur.execute(
+        f"SELECT count(*) FROM {qualified_source} WHERE tasked IS TRUE"
+    )
+    tasked_parents = int(cur.fetchone()[0])
+
+    saved_links: dict[str, list[tuple]] = {}
+    tasked_guard = tasked_child_delete_guard(qualified_source, "t")
+    skipped_split_children = 0
     for target in (points_q, lines_q, polygons_q):
-        cur.execute(f"TRUNCATE TABLE {target} RESTART IDENTITY")
+        saved_links[target] = _save_task_key_links(cur, target)
+        cur.execute(
+            f"SELECT count(*) FROM {target} t "
+            f"WHERE t.task_key IS NULL {tasked_guard}"
+        )
+        skipped_split_children += int(cur.fetchone()[0])
+        cur.execute(
+            f"DELETE FROM {target} t WHERE t.task_key IS NULL {tasked_guard}"
+        )
 
     points = _insert_routed(
         cur, qualified_source, points_q, attr_cols, _POINT_TYPES,
@@ -358,6 +449,17 @@ def rebuild_geom_split(cur: Any, qualified_source: str) -> Optional[GeomSplitRes
     collection_parts = _count_collection_parts_routed(cur, qualified_source)
     skipped = _count_skipped(cur, qualified_source)
 
+    for target, links in saved_links.items():
+        before = sum(1 for _ in links)
+        restored = _restore_task_key_links(cur, target, links)
+        if before and restored < before:
+            logger.warning(
+                "Geom split %s: restored %s/%s task_key links",
+                target,
+                restored,
+                before,
+            )
+
     if skipped:
         logger.warning(
             "Geom split %s: skipped %s rows (invalid, empty, or no routable parts)",
@@ -367,7 +469,8 @@ def rebuild_geom_split(cur: Any, qualified_source: str) -> Optional[GeomSplitRes
 
     logger.info(
         "Geom split %s -> points=%s lines=%s polygons=%s (derived=%s) "
-        "collections=%s rows / %s parts routed, skipped=%s",
+        "collections=%s rows / %s parts routed, skipped=%s, "
+        "tasked_parents=%s, skipped_split_children=%s",
         qualified_source,
         points,
         lines,
@@ -376,6 +479,8 @@ def rebuild_geom_split(cur: Any, qualified_source: str) -> Optional[GeomSplitRes
         collection_rows,
         collection_parts,
         skipped,
+        tasked_parents,
+        skipped_split_children,
     )
 
     return GeomSplitResult(

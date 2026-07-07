@@ -77,13 +77,18 @@ def purge_archived(
         )
         return 0
 
+    has_task_key = column_exists(cur, schema, table, "task_key")
+    has_tasked = column_exists(cur, schema, table, "tasked")
+    task_key_guard = "task_key IS NULL AND " if has_task_key else ""
+    tasked_guard = "tasked IS NOT TRUE AND " if has_tasked else ""
+
     quoted_col = f'"{column}"'
 
     if rule.kind == "date_on_or_before_month_ago":
         cur.execute(
             f"""
             DELETE FROM {qualified_table}
-            WHERE {quoted_col} IS NOT NULL
+            WHERE {task_key_guard}{tasked_guard}{quoted_col} IS NOT NULL
               AND btrim({quoted_col}::text) <> ''
               AND data_mos.parse_text_date({quoted_col}::text) IS NOT NULL
               AND data_mos.parse_text_date({quoted_col}::text) <= (
@@ -96,7 +101,7 @@ def purge_archived(
         cur.execute(
             f"""
             DELETE FROM {qualified_table}
-            WHERE {quoted_col} IS NOT NULL
+            WHERE {task_key_guard}{tasked_guard}{quoted_col} IS NOT NULL
               AND btrim({quoted_col}::text) <> ''
               AND data_mos.extract_year({quoted_col}::text) IS NOT NULL
               AND data_mos.extract_year({quoted_col}::text) < (

@@ -12,11 +12,14 @@ from collector.data_mos_geom_split import (
     _POINT_TYPES,
     _POLYGON_TYPES,
     _collection_parts_lateral_sql,
+    _insert_routed,
     collection_insert_sql_fragment,
     _valid_geom_expr,
     _valid_geom_filter,
     qualified_split_names,
 )
+from collector.data_mos_tasked import tasked_child_delete_guard
+from unittest.mock import MagicMock
 
 
 class QualifiedSplitNamesTests(unittest.TestCase):
@@ -62,6 +65,27 @@ class GeometryCollectionSqlTests(unittest.TestCase):
         self.assertIn(collection_insert_sql_fragment(), sql)
         self.assertIn(_GEOMETRY_COLLECTION_TYPE, sql)
         self.assertIn("UNION ALL", sql)
+
+
+class TaskedGuardTests(unittest.TestCase):
+    def test_delete_guard_protects_tasked_parent_children(self) -> None:
+        guard = tasked_child_delete_guard("data_mos.items_2855", "t")
+        self.assertIn("p.tasked IS TRUE", guard)
+        self.assertIn("t.source_id", guard)
+
+    def test_insert_routed_skips_tasked_parents(self) -> None:
+        cur = MagicMock()
+        cur.rowcount = 0
+        _insert_routed(
+            cur,
+            "data_mos.items_2855",
+            "data_mos.items_2855_points",
+            ["global_id"],
+            _POINT_TYPES,
+        )
+        sql = cur.execute.call_args[0][0]
+        self.assertIn("src.tasked IS NOT TRUE", sql)
+        self.assertIn("FROM data_mos.items_2855 AS src", sql)
 
 
 if __name__ == "__main__":

@@ -22,11 +22,13 @@ from collector.data_mos_schema import (
     ensure_base_table,
     ensure_columns,
     extract_feature_properties,
-    insert_feature,
+    upsert_feature,
 )
+from collector.crm_task_sync import sync_crm_tasks_after_etl
 from collector.data_mos_geom_split import GeomSplitResult, rebuild_geom_split
 from collector.data_mos_line_to_polygon import derive_polygons_from_lines
 from collector.data_mos_purge import purge_archived
+from collector.data_mos_tasked import ensure_tasked_column
 from collector.db import local_connection, log_job_run
 from collector.jobs import ogh_disruption_job
 
@@ -93,6 +95,25 @@ def run_export(config: DataMosExportConfig) -> None:
     logger.info("Export completed successfully for service %s", config.service_id)
 
 
+def _count_split_task_keys(cur, table: str) -> int:
+    total = 0
+    for suffix in ("_points", "_lines", "_polygons"):
+        qualified = f"data_mos.{table}{suffix}"
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'data_mos' AND table_name = %s
+            """,
+            (f"{table}{suffix}",),
+        )
+        if cur.fetchone() is None:
+            continue
+        cur.execute(f"SELECT COUNT(*) FROM {qualified} WHERE task_key IS NOT NULL")
+        row = cur.fetchone()
+        total += int(row[0]) if row else 0
+    return total
+
+
 def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
     """Load GeoJSON into data_mos.<table> with dynamic columns from JSON keys."""
     table = _validate_table_name(config.table)
@@ -117,22 +138,53 @@ def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
         with conn.cursor() as cur:
             ensure_base_table(cur, qualified)
             ensure_columns(cur, qualified, schema)
-            cur.execute(f"TRUNCATE TABLE {qualified} RESTART IDENTITY")
+            ensure_tasked_column(cur, qualified)
+            linked_before = _count_split_task_keys(cur, table)
+            incoming_ids: set[int] = set()
             count = 0
             for _, row in gdf.iterrows():
                 props = extract_feature_properties(row)
                 geom_json = None
                 if row.geometry is not None and not row.geometry.is_empty:
                     geom_json = json.dumps(row.geometry.__geo_interface__)
-                insert_feature(cur, qualified, schema, props, geom_json)
+                row_id = upsert_feature(cur, qualified, schema, props, geom_json)
+                if row_id:
+                    incoming_ids.add(row_id)
                 count += 1
 
+            if incoming_ids:
+                cur.execute(
+                    f"DELETE FROM {qualified} "
+                    f"WHERE id <> ALL(%s) AND tasked IS NOT TRUE",
+                    (list(incoming_ids),),
+                )
             purged = 0
             if config.purge_rule is not None:
                 purged = purge_archived(cur, qualified, config.purge_rule)
 
             derived = derive_polygons_from_lines(cur, qualified)
             split = rebuild_geom_split(cur, qualified)
+            sync_crm_tasks_after_etl(cur, table)
+
+            linked_after = _count_split_task_keys(cur, table)
+            if linked_after < linked_before:
+                logger.error(
+                    "task_key count dropped for %s: %s -> %s",
+                    table,
+                    linked_before,
+                    linked_after,
+                )
+                raise RuntimeError(
+                    f"task_key preservation failed for {table}: "
+                    f"{linked_before} -> {linked_after}"
+                )
+            if linked_before or linked_after:
+                logger.info(
+                    "task_key links for %s: before=%s after=%s",
+                    table,
+                    linked_before,
+                    linked_after,
+                )
 
     return LoadResult(
         loaded=count,
