@@ -330,22 +330,46 @@ def _save_task_key_links(cur: Any, target_qualified: str) -> list[tuple]:
 
 
 def _restore_task_key_links(cur: Any, target_qualified: str, links: list[tuple]) -> int:
-    occupied_guard = f"""
+    occupied_guard = """
                   AND NOT EXISTS (
-                      SELECT 1 FROM {target_qualified} occupied
+                      SELECT 1 FROM {table} occupied
                       WHERE occupied.task_key = %s
-                  )"""
+                  )""".format(table=target_qualified)
     restored = 0
     for task_key, global_id, geom_hash, _old_id in links:
         if global_id is not None and geom_hash:
             cur.execute(
                 f"""
-                UPDATE {target_qualified}
-                SET task_key = %s
+                SELECT count(*) FROM {target_qualified}
                 WHERE task_key IS NULL
                   AND global_id = %s
                   AND {_geom_hash_expr("geom")} = %s
-                {occupied_guard}
+                """,
+                (global_id, geom_hash),
+            )
+            candidates = int(cur.fetchone()[0])
+            if candidates > 1:
+                logger.warning(
+                    "Geom split %s: %s rows match global_id=%s geom_hash; "
+                    "restoring task_key %s to one row only",
+                    target_qualified,
+                    candidates,
+                    global_id,
+                    task_key,
+                )
+            cur.execute(
+                f"""
+                UPDATE {target_qualified}
+                SET task_key = %s
+                WHERE id = (
+                    SELECT id FROM {target_qualified}
+                    WHERE task_key IS NULL
+                      AND global_id = %s
+                      AND {_geom_hash_expr("geom")} = %s
+                    {occupied_guard}
+                    ORDER BY id
+                    LIMIT 1
+                )
                 """,
                 (task_key, global_id, geom_hash, task_key),
             )

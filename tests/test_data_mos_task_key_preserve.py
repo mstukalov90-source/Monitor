@@ -23,6 +23,7 @@ def test_save_and_restore_task_key_links_by_global_id_geom_hash():
     assert len(links) == 1
 
     cur.rowcount = 1
+    cur.fetchone.return_value = (1,)
     restored = _restore_task_key_links(cur, "data_mos.items_2855_lines", links)
     assert restored == 1
     update_call = next(c for c in cur.execute.call_args_list if "UPDATE" in c[0][0])
@@ -31,6 +32,7 @@ def test_save_and_restore_task_key_links_by_global_id_geom_hash():
     assert "global_id" in update_sql
     assert "task_key" in update_sql
     assert "NOT EXISTS" in update_sql
+    assert "LIMIT 1" in update_sql
     assert update_params == (task_key, global_id, geom_hash, task_key)
 
 
@@ -42,10 +44,13 @@ def test_restore_skips_when_task_key_already_occupied():
         (task_key, 222, "hash_b", 2),
     ]
     rowcount_queue = [1, 0]
+    select_count_queue = [1, 1]
 
     def execute_side_effect(sql, params=None):
         if sql.strip().upper().startswith("UPDATE"):
             cur.rowcount = rowcount_queue.pop(0)
+        elif "count(*)" in sql:
+            cur.fetchone.return_value = (select_count_queue.pop(0),)
         elif sql.strip().upper().startswith("SELECT"):
             cur.fetchone.return_value = (1,)
 
@@ -58,6 +63,21 @@ def test_restore_skips_when_task_key_already_occupied():
     for call in update_calls:
         assert "NOT EXISTS" in call[0][0]
         assert call[0][1][-1] == task_key
+
+
+def test_restore_updates_only_one_row_when_global_id_geom_hash_matches_multiple():
+    cur = MagicMock()
+    task_key = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    links = [(task_key, 931, "hash_shared", 1534)]
+
+    cur.fetchone.side_effect = [(3,), None]
+    cur.rowcount = 1
+
+    restored = _restore_task_key_links(cur, "data_mos.items_62501_points", links)
+    assert restored == 1
+    update_sql = next(c[0][0] for c in cur.execute.call_args_list if "UPDATE" in c[0][0])
+    assert "LIMIT 1" in update_sql
+    assert "WHERE id = (" in update_sql
 
 
 def test_restore_sql_includes_not_exists_for_id_fallback():

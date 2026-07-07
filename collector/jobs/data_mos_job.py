@@ -24,7 +24,7 @@ from collector.data_mos_schema import (
     extract_feature_properties,
     upsert_feature,
 )
-from collector.crm_task_sync import sync_crm_tasks_after_etl
+from collector.crm_task_sync import CrmTaskSyncResult, sync_crm_tasks_after_etl
 from collector.data_mos_geom_split import GeomSplitResult, rebuild_geom_split
 from collector.data_mos_line_to_polygon import derive_polygons_from_lines
 from collector.data_mos_purge import purge_archived
@@ -43,6 +43,7 @@ class LoadResult:
     purged: int
     derived_polygons: int = 0
     split: GeomSplitResult | None = None
+    crm_sync: CrmTaskSyncResult | None = None
 
 
 def _format_load_success_message(result: LoadResult) -> str:
@@ -56,6 +57,12 @@ def _format_load_success_message(result: LoadResult) -> str:
         parts.append(
             f"geom split: {result.split.points} points, {result.split.lines} lines, "
             f"{result.split.polygons} polygons ({result.split.skipped} skipped)"
+        )
+    if result.crm_sync is not None:
+        parts.append(
+            f"crm_sync: inserted={result.crm_sync.inserted} "
+            f"linked={result.crm_sync.linked} "
+            f"tasked_parents={result.crm_sync.tasked_parents}"
         )
     return ", ".join(parts)
 
@@ -164,7 +171,7 @@ def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
 
             derived = derive_polygons_from_lines(cur, qualified)
             split = rebuild_geom_split(cur, qualified)
-            sync_crm_tasks_after_etl(cur, table)
+            crm_sync = sync_crm_tasks_after_etl(cur, table)
 
             linked_after = _count_split_task_keys(cur, table)
             if linked_after < linked_before:
@@ -191,6 +198,7 @@ def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
         purged=purged,
         derived_polygons=derived,
         split=split,
+        crm_sync=crm_sync,
     )
 
 

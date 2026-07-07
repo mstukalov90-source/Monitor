@@ -14,6 +14,7 @@ from collector.crm_task_sync_config import (
     ServiceTaskSync,
     TASK_ID_COLUMNS,
 )
+from collector.data_mos_tasked import refresh_all_tasked_parents
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,10 @@ def _link_split_rows(cur: Any, cfg: ServiceTaskSync, layer: SplitLayerSync) -> i
         WHERE t.task_key IS NULL
           AND t.geom IS NOT NULL
           AND ct."{task_column}" = {business_id_expr}
+          AND NOT EXISTS (
+              SELECT 1 FROM {items_table} occupied
+              WHERE occupied.task_key = ct.key AND occupied.id <> t.id
+          )
     """
     cur.execute(link_query)
     linked = cur.rowcount
@@ -114,28 +119,6 @@ def _link_split_rows(cur: Any, cfg: ServiceTaskSync, layer: SplitLayerSync) -> i
     return linked
 
 
-def _mark_tasked_parents(cur: Any, cfg: ServiceTaskSync) -> int:
-    schema, table = cfg.parent_table.split(".", 1)
-    conditions = " OR ".join(
-        f"""
-        EXISTS (
-            SELECT 1 FROM {schema}.{table}{suffix} c
-            WHERE c.source_id = p.id AND c.task_key IS NOT NULL
-        )
-        """.strip()
-        for suffix in ("_points", "_lines", "_polygons")
-    )
-    cur.execute(
-        f"""
-        UPDATE {cfg.parent_table} p
-        SET tasked = true
-        WHERE ({conditions})
-          AND p.tasked IS NOT TRUE
-        """
-    )
-    return cur.rowcount
-
-
 def sync_crm_tasks_after_etl(cur: Any, parent_table_name: str) -> CrmTaskSyncResult:
     """Run after geom split for one data_mos service parent table."""
     cfg = SERVICE_TASK_SYNC.get(parent_table_name)
@@ -147,7 +130,7 @@ def sync_crm_tasks_after_etl(cur: Any, parent_table_name: str) -> CrmTaskSyncRes
         result.inserted += _insert_new_tasks(cur, cfg, layer)
         result.linked += _link_split_rows(cur, cfg, layer)
 
-    result.tasked_parents = _mark_tasked_parents(cur, cfg)
+    result.tasked_parents = refresh_all_tasked_parents(cur, cfg.parent_table)
 
     logger.info(
         "crm_task_sync %s: inserted=%s linked=%s tasked_parents=%s",

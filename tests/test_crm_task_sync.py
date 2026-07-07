@@ -40,6 +40,7 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
         anchor_sql = cur.execute.call_args_list[1][0][0]
         self.assertIn("SET task_key = ct.key", link_sql)
         self.assertIn("CONCAT('line:', t.id::text)", link_sql)
+        self.assertIn("occupied.task_key = ct.key", link_sql)
         self.assertIn("source_geom_hash", anchor_sql)
         self.assertIn("source_table", anchor_sql)
 
@@ -55,6 +56,14 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
         result = sync_crm_tasks_after_etl(cur, "items_99999")
         cur.execute.assert_not_called()
         self.assertEqual(result.inserted, 0)
+
+    def test_sync_refreshes_tasked_bidirectionally(self) -> None:
+        cur = MagicMock()
+        cur.rowcount = 1
+        sync_crm_tasks_after_etl(cur, "items_2855")
+        tasked_sql = cur.execute.call_args_list[-1][0][0]
+        self.assertIn("SET tasked = (", tasked_sql)
+        self.assertNotIn("IS NOT TRUE", tasked_sql)
 
 
 if __name__ == "__main__":

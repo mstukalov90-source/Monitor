@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from collector.crm_photo_task_sync import sync_lens_photo_tasks
 from collector.db import (
     execute_sql_file,
     list_remote_public_tables,
@@ -29,6 +30,7 @@ def run() -> None:
     total_rows = 0
     tables_synced = 0
     purged = 0
+    tasks_inserted = 0
 
     try:
         with remote_connection() as remote_conn, local_connection() as local_conn:
@@ -58,21 +60,27 @@ def run() -> None:
 
             with local_conn.cursor() as cur:
                 purged = purge_reports(cur)
+                sync_result = sync_lens_photo_tasks(cur)
+                tasks_inserted = sync_result.inserted
 
         with local_connection() as conn:
             log_job_run(
                 conn,
                 JOB_NAME,
                 "success",
-                f"Synced {tables_synced} tables, {total_rows} rows, purged {purged} reports",
+                (
+                    f"Synced {tables_synced} tables, {total_rows} rows, "
+                    f"purged {purged} reports, tasks_inserted={tasks_inserted}"
+                ),
                 rows_affected=total_rows,
                 run_id=run_id,
             )
         logger.info(
-            "lens_sync finished: %s tables, %s rows, purged %s reports",
+            "lens_sync finished: %s tables, %s rows, purged %s reports, tasks_inserted=%s",
             tables_synced,
             total_rows,
             purged,
+            tasks_inserted,
         )
 
     except Exception as exc:
