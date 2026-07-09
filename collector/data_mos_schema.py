@@ -246,6 +246,29 @@ def prepare_value(val: Any, pg_type: str) -> Any:
     return str(val) if not isinstance(val, (str, int, float, bool)) else val
 
 
+def truncate_table(cur: Cursor, qualified_table: str) -> None:
+    """Full replace: clear all rows and reset id sequence."""
+    cur.execute(f"TRUNCATE TABLE {qualified_table} RESTART IDENTITY")
+
+
+def reload_features(
+    cur: Cursor,
+    qualified_table: str,
+    schema: dict[str, str],
+    gdf: gpd.GeoDataFrame,
+) -> int:
+    """Insert all features after truncate (no upsert / id preservation)."""
+    count = 0
+    for _, row in gdf.iterrows():
+        props = extract_feature_properties(row)
+        geom_json = None
+        if row.geometry is not None and not row.geometry.is_empty:
+            geom_json = json.dumps(row.geometry.__geo_interface__)
+        insert_feature(cur, qualified_table, schema, props, geom_json)
+        count += 1
+    return count
+
+
 def insert_feature(
     cur: Cursor,
     qualified_table: str,

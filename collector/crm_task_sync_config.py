@@ -73,3 +73,8 @@ TASK_ID_COLUMNS = (
     "localwork_id",
     "avr_mos_id",
 )
+
+
+def is_task_sync_parent(table: str) -> bool:
+    """True for parent items_* tables that participate in CRM task sync."""
+    return table in SERVICE_TASK_SYNC

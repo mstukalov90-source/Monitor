@@ -11,6 +11,8 @@ Daily schedule (Europe/Moscow):
   genplan_upload_pipeline — genplan_upload → genplan_fetch_uploaded → genplan (manual)
   genplan_download — download photos (disruption in hood) to downloaded_photo/ (manual)
   backfill_ai_photo_tasks — one-time crm.tasks from genplan.photo_meta (manual)
+  backfill_data_mos_crm_tasks — backfill crm.tasks for data_mos split tables (manual)
+  crm_task_sync_audit — audit data_mos vs crm.tasks (03:30 daily)
 """
 
 from __future__ import annotations
@@ -26,6 +28,8 @@ from apscheduler.triggers.cron import CronTrigger
 from collector.config import DATA_MOS_EXPORTS, TZ
 from collector.jobs import (
     backfill_ai_photo_tasks_job,
+    backfill_data_mos_crm_tasks_job,
+    crm_task_sync_audit_job,
     data_mos_job,
     genplan_download_job,
     genplan_fetch_job,
@@ -78,6 +82,8 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "genplan_upload": genplan_upload_job.run,
         "genplan_download": genplan_download_job.run,
         "backfill_ai_photo_tasks": backfill_ai_photo_tasks_job.run,
+        "backfill_data_mos_crm_tasks": backfill_data_mos_crm_tasks_job.run,
+        "crm_task_sync_audit": crm_task_sync_audit_job.run,
         "genplan_pipeline": run_genplan_pipeline,
         "genplan_upload_pipeline": run_genplan_upload_pipeline,
         "vector_stroy_url_222": vector_stroy_job.run,
@@ -116,6 +122,13 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
+        crm_task_sync_audit_job.run,
+        CronTrigger(hour=3, minute=30, timezone=TZ),
+        id="crm_task_sync_audit",
+        name="CRM task sync audit",
+        replace_existing=True,
+    )
+    scheduler.add_job(
         run_lens_pipeline,
         CronTrigger(hour=4, minute=0, timezone=TZ),
         id="lens_pipeline",
@@ -142,6 +155,8 @@ def start_scheduler() -> None:
     logger.info("  (genplan_fetch_uploaded — manual only: --run genplan_fetch_uploaded)")
     logger.info("  (genplan_download — manual only: --run genplan_download)")
     logger.info("  (backfill_ai_photo_tasks — manual only: --run backfill_ai_photo_tasks)")
+    logger.info("  (backfill_data_mos_crm_tasks — manual only: --run backfill_data_mos_crm_tasks)")
+    logger.info("  03:30 — crm_task_sync_audit")
 
     try:
         scheduler.start()

@@ -17,11 +17,14 @@ from collector.config import (
     DataMosExportConfig,
     PROJECT_DIR,
 )
+from collector.crm_task_sync_config import is_task_sync_parent
 from collector.data_mos_schema import (
     collect_schema,
     ensure_base_table,
     ensure_columns,
     extract_feature_properties,
+    reload_features,
+    truncate_table,
     upsert_feature,
 )
 from collector.crm_task_sync import CrmTaskSyncResult, sync_crm_tasks_after_etl
@@ -30,7 +33,7 @@ from collector.data_mos_line_to_polygon import derive_polygons_from_lines
 from collector.data_mos_purge import purge_archived
 from collector.data_mos_tasked import ensure_tasked_column
 from collector.db import local_connection, log_job_run
-from collector.jobs import ogh_disruption_job
+from collector.jobs import crm_task_sync_audit_job, ogh_disruption_job
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,7 @@ _TABLE_NAME_RE = re.compile(r"^items_\d+$")
 class LoadResult:
     loaded: int
     purged: int
+    truncated: bool = False
     derived_polygons: int = 0
     split: GeomSplitResult | None = None
     crm_sync: CrmTaskSyncResult | None = None
@@ -51,6 +55,8 @@ def _format_load_success_message(result: LoadResult) -> str:
         f"Loaded {result.loaded} features",
         f"purged {result.purged} archived rows",
     ]
+    if result.truncated:
+        parts.insert(0, "reload: truncated")
     if result.derived_polygons:
         parts.append(f"derived {result.derived_polygons} polygons in items_*")
     if result.split:
@@ -102,6 +108,28 @@ def run_export(config: DataMosExportConfig) -> None:
     logger.info("Export completed successfully for service %s", config.service_id)
 
 
+def _count_split_gap(cur, table: str) -> int:
+    total = 0
+    for suffix in ("_points", "_lines", "_polygons"):
+        qualified = f"data_mos.{table}{suffix}"
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'data_mos' AND table_name = %s
+            """,
+            (f"{table}{suffix}",),
+        )
+        if cur.fetchone() is None:
+            continue
+        cur.execute(
+            f"SELECT COUNT(*) FROM {qualified} "
+            f"WHERE geom IS NOT NULL AND task_key IS NULL"
+        )
+        row = cur.fetchone()
+        total += int(row[0]) if row else 0
+    return total
+
+
 def _count_split_task_keys(cur, table: str) -> int:
     total = 0
     for suffix in ("_points", "_lines", "_polygons"):
@@ -119,6 +147,102 @@ def _count_split_task_keys(cur, table: str) -> int:
         row = cur.fetchone()
         total += int(row[0]) if row else 0
     return total
+
+
+def _load_reload_path(
+    cur,
+    config: DataMosExportConfig,
+    qualified: str,
+    schema: dict[str, str],
+    gdf: gpd.GeoDataFrame,
+) -> LoadResult:
+    """TRUNCATE + insert for services without CRM task sync."""
+    truncate_table(cur, qualified)
+    count = reload_features(cur, qualified, schema, gdf)
+    purged = 0
+    if config.purge_rule is not None:
+        purged = purge_archived(cur, qualified, config.purge_rule)
+    return LoadResult(loaded=count, purged=purged, truncated=True)
+
+
+def _load_upsert_path(
+    cur,
+    config: DataMosExportConfig,
+    table: str,
+    qualified: str,
+    schema: dict[str, str],
+    gdf: gpd.GeoDataFrame,
+) -> LoadResult:
+    """Per-row upsert with task_key preservation for CRM task-sync services."""
+    ensure_tasked_column(cur, qualified)
+    linked_before = _count_split_task_keys(cur, table)
+    incoming_ids: set[int] = set()
+    count = 0
+    for _, row in gdf.iterrows():
+        props = extract_feature_properties(row)
+        geom_json = None
+        if row.geometry is not None and not row.geometry.is_empty:
+            geom_json = json.dumps(row.geometry.__geo_interface__)
+        row_id = upsert_feature(cur, qualified, schema, props, geom_json)
+        if row_id:
+            incoming_ids.add(row_id)
+        count += 1
+
+    if incoming_ids:
+        cur.execute(
+            f"DELETE FROM {qualified} "
+            f"WHERE id <> ALL(%s) AND tasked IS NOT TRUE",
+            (list(incoming_ids),),
+        )
+    purged = 0
+    if config.purge_rule is not None:
+        purged = purge_archived(cur, qualified, config.purge_rule)
+
+    derived = derive_polygons_from_lines(cur, qualified)
+    split = rebuild_geom_split(cur, qualified)
+    crm_sync = sync_crm_tasks_after_etl(cur, table)
+
+    gap_after = _count_split_gap(cur, table)
+    if (
+        crm_sync is not None
+        and gap_after > 0
+        and crm_sync.inserted == 0
+        and crm_sync.linked == 0
+    ):
+        logger.error(
+            "CRM task sync gap for %s: %s rows with geom lack task_key "
+            "after crm_sync inserted=0 linked=0",
+            table,
+            gap_after,
+        )
+
+    linked_after = _count_split_task_keys(cur, table)
+    if linked_after < linked_before:
+        logger.error(
+            "task_key count dropped for %s: %s -> %s",
+            table,
+            linked_before,
+            linked_after,
+        )
+        raise RuntimeError(
+            f"task_key preservation failed for {table}: "
+            f"{linked_before} -> {linked_after}"
+        )
+    if linked_before or linked_after:
+        logger.info(
+            "task_key links for %s: before=%s after=%s",
+            table,
+            linked_before,
+            linked_after,
+        )
+
+    return LoadResult(
+        loaded=count,
+        purged=purged,
+        derived_polygons=derived,
+        split=split,
+        crm_sync=crm_sync,
+    )
 
 
 def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
@@ -145,61 +269,9 @@ def load_geojson_to_db(config: DataMosExportConfig) -> LoadResult:
         with conn.cursor() as cur:
             ensure_base_table(cur, qualified)
             ensure_columns(cur, qualified, schema)
-            ensure_tasked_column(cur, qualified)
-            linked_before = _count_split_task_keys(cur, table)
-            incoming_ids: set[int] = set()
-            count = 0
-            for _, row in gdf.iterrows():
-                props = extract_feature_properties(row)
-                geom_json = None
-                if row.geometry is not None and not row.geometry.is_empty:
-                    geom_json = json.dumps(row.geometry.__geo_interface__)
-                row_id = upsert_feature(cur, qualified, schema, props, geom_json)
-                if row_id:
-                    incoming_ids.add(row_id)
-                count += 1
-
-            if incoming_ids:
-                cur.execute(
-                    f"DELETE FROM {qualified} "
-                    f"WHERE id <> ALL(%s) AND tasked IS NOT TRUE",
-                    (list(incoming_ids),),
-                )
-            purged = 0
-            if config.purge_rule is not None:
-                purged = purge_archived(cur, qualified, config.purge_rule)
-
-            derived = derive_polygons_from_lines(cur, qualified)
-            split = rebuild_geom_split(cur, qualified)
-            crm_sync = sync_crm_tasks_after_etl(cur, table)
-
-            linked_after = _count_split_task_keys(cur, table)
-            if linked_after < linked_before:
-                logger.error(
-                    "task_key count dropped for %s: %s -> %s",
-                    table,
-                    linked_before,
-                    linked_after,
-                )
-                raise RuntimeError(
-                    f"task_key preservation failed for {table}: "
-                    f"{linked_before} -> {linked_after}"
-                )
-            if linked_before or linked_after:
-                logger.info(
-                    "task_key links for %s: before=%s after=%s",
-                    table,
-                    linked_before,
-                    linked_after,
-                )
-
-    return LoadResult(
-        loaded=count,
-        purged=purged,
-        derived_polygons=derived,
-        split=split,
-        crm_sync=crm_sync,
-    )
+            if is_task_sync_parent(table):
+                return _load_upsert_path(cur, config, table, qualified, schema, gdf)
+            return _load_reload_path(cur, config, qualified, schema, gdf)
 
 
 def cleanup_export_files(config: DataMosExportConfig) -> None:
@@ -245,3 +317,4 @@ def run_all_data_mos() -> None:
     for config in DATA_MOS_EXPORTS:
         run_for(config)
     ogh_disruption_job.run()
+    crm_task_sync_audit_job.run()
