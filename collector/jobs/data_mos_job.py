@@ -31,6 +31,7 @@ from collector.crm_task_sync import CrmTaskSyncResult, sync_crm_tasks_after_etl
 from collector.data_mos_geom_split import GeomSplitResult, rebuild_geom_split
 from collector.data_mos_line_to_polygon import derive_polygons_from_lines
 from collector.data_mos_purge import purge_archived
+from collector.data_mos_stream_load import stream_load_to_db
 from collector.data_mos_tasked import ensure_tasked_column
 from collector.db import local_connection, log_job_run
 from collector.jobs import crm_task_sync_audit_job, ogh_disruption_job
@@ -68,7 +69,8 @@ def _format_load_success_message(result: LoadResult) -> str:
         parts.append(
             f"crm_sync: inserted={result.crm_sync.inserted} "
             f"linked={result.crm_sync.linked} "
-            f"tasked_parents={result.crm_sync.tasked_parents}"
+            f"tasked_parents={result.crm_sync.tasked_parents} "
+            f"sent_to_field={result.crm_sync.sent_to_field}"
         )
     return ", ".join(parts)
 
@@ -291,9 +293,13 @@ def run_for(config: DataMosExportConfig) -> None:
         )
 
     try:
-        run_export(config)
-        result = load_geojson_to_db(config)
-        cleanup_export_files(config)
+        if config.stream_load:
+            loaded = stream_load_to_db(config)
+            result = LoadResult(loaded=loaded, purged=0, truncated=True)
+        else:
+            run_export(config)
+            result = load_geojson_to_db(config)
+            cleanup_export_files(config)
         with local_connection() as conn:
             log_job_run(
                 conn, config.job_name, "success",

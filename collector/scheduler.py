@@ -3,8 +3,12 @@ Scheduler for MONITOR data collector.
 
 Daily schedule (Europe/Moscow):
   03:00 — data_mos (all 8 exports sequentially), then ogh_disruption if mggt_dgn.geojson exists
+  03:30 — crm_task_sync_audit
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
   06:00 — vector_stroy_url_222: fetch map221/rs_2022 + DROP + GeoJSON upsert
+
+Monthly (Europe/Moscow):
+  01:00 first Saturday — data_mos_60562 (export + TRUNCATE load, no purge/split)
 
   genplan_pipeline (genplan_fetch + import) — manual only: --run genplan_pipeline
   genplan_upload — manual only: --run genplan_upload
@@ -12,7 +16,6 @@ Daily schedule (Europe/Moscow):
   genplan_download — download photos (disruption in hood) to downloaded_photo/ (manual)
   backfill_ai_photo_tasks — one-time crm.tasks from genplan.photo_meta (manual)
   backfill_data_mos_crm_tasks — backfill crm.tasks for data_mos split tables (manual)
-  crm_task_sync_audit — audit data_mos vs crm.tasks (03:30 daily)
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from typing import Callable
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from collector.config import DATA_MOS_EXPORTS, TZ
+from collector.config import DATA_MOS_EXPORTS, DATA_MOS_MONTHLY_EXPORTS, TZ
 from collector.jobs import (
     backfill_ai_photo_tasks_job,
     backfill_data_mos_crm_tasks_job,
@@ -90,6 +93,8 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
     }
     for config in DATA_MOS_EXPORTS:
         jobs[config.job_name] = lambda c=config: data_mos_job.run_for(c)
+    for config in DATA_MOS_MONTHLY_EXPORTS:
+        jobs[config.job_name] = lambda c=config: data_mos_job.run_for(c)
     return jobs
 
 
@@ -111,9 +116,21 @@ def run_job(name: str) -> None:
     JOBS[name]()
 
 
+def _run_monthly_data_mos() -> None:
+    for config in DATA_MOS_MONTHLY_EXPORTS:
+        data_mos_job.run_for(config)
+
+
 def start_scheduler() -> None:
     scheduler = BlockingScheduler(timezone=TZ)
 
+    scheduler.add_job(
+        _run_monthly_data_mos,
+        CronTrigger(day="1-7", day_of_week="sat", hour=1, minute=0, timezone=TZ),
+        id="data_mos_monthly",
+        name="Data MOS monthly exports (first Saturday)",
+        replace_existing=True,
+    )
     scheduler.add_job(
         data_mos_job.run_all_data_mos,
         CronTrigger(hour=3, minute=0, timezone=TZ),
@@ -144,10 +161,15 @@ def start_scheduler() -> None:
     )
 
     logger.info("Scheduler started (timezone=%s)", TZ)
+    logger.info(
+        "  01:00 first Saturday — data_mos monthly (%s)",
+        ", ".join(c.job_name for c in DATA_MOS_MONTHLY_EXPORTS),
+    )
     logger.info("  03:00 — data_mos (%s services), then ogh_disruption", len(DATA_MOS_EXPORTS))
     for config in DATA_MOS_EXPORTS:
         logger.info("         — %s", config.job_name)
     logger.info("         — ogh_disruption (mggt_dgn/mggt_dgn.geojson, if present)")
+    logger.info("  03:30 — crm_task_sync_audit")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  06:00 — vector_stroy_url_222")
     logger.info("  (genplan_pipeline — manual only: --run genplan_pipeline)")
@@ -156,7 +178,6 @@ def start_scheduler() -> None:
     logger.info("  (genplan_download — manual only: --run genplan_download)")
     logger.info("  (backfill_ai_photo_tasks — manual only: --run backfill_ai_photo_tasks)")
     logger.info("  (backfill_data_mos_crm_tasks — manual only: --run backfill_data_mos_crm_tasks)")
-    logger.info("  03:30 — crm_task_sync_audit")
 
     try:
         scheduler.start()

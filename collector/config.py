@@ -80,7 +80,7 @@ GENPLAN_DOWNLOAD_HOOD_GIDS = _parse_int_list(
     os.getenv("GENPLAN_DOWNLOAD_HOOD_GIDS", ""),
     default=os.getenv(
         "GENPLAN_DOWNLOAD_HOOD_GID",
-        "20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124",
+        "1,2,3,4,5,6,7,8,9,10,11,12,13,14,20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124,128,129,130",
     ),
 )
 
@@ -158,11 +158,15 @@ class DataMosExportConfig:
     table: str
     job_name: str
     purge_rule: Optional[DataMosPurgeRule] = None
+    # Page API → DB directly (for large datasets that OOM on full GeoJSON export).
+    stream_load: bool = False
 
 
 def _data_mos_export(
     service_id: int,
     purge_rule: Optional[DataMosPurgeRule] = None,
+    *,
+    stream_load: bool = False,
 ) -> DataMosExportConfig:
     prefix = f"Data_mos_export_{service_id}"
     return DataMosExportConfig(
@@ -173,6 +177,7 @@ def _data_mos_export(
         table=f"items_{service_id}",
         job_name=f"data_mos_{service_id}",
         purge_rule=purge_rule,
+        stream_load=stream_load,
     )
 
 
@@ -195,8 +200,14 @@ DATA_MOS_EXPORTS: tuple[DataMosExportConfig, ...] = (
     _data_mos_export(62441, _ACTUAL_END_DATE_PURGE),
 )
 
+# Monthly schedule (first Saturday 01:00 MSK); not part of daily run_all_data_mos.
+DATA_MOS_MONTHLY_EXPORTS: tuple[DataMosExportConfig, ...] = (
+    _data_mos_export(60562, stream_load=True),  # ~550k rows; no purge/split
+)
+
 DATA_MOS_EXPORT_BY_JOB: dict[str, DataMosExportConfig] = {
-    cfg.job_name: cfg for cfg in DATA_MOS_EXPORTS
+    cfg.job_name: cfg
+    for cfg in (*DATA_MOS_EXPORTS, *DATA_MOS_MONTHLY_EXPORTS)
 }
 
 DATA_MOS_TABLES_SQL = PROJECT_DIR / "sql" / "04_data_mos_dynamic_tables.sql"

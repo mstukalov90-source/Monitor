@@ -6,7 +6,8 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 
 | Vremya | Zadacha | Opisanie |
 |-------|--------|----------|
-| 03:00 | `data_mos` | Vse 8 eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
+| 01:00 (1-ya sb mesyatsa) | `data_mos_60562` | Eksport `data_mos_export_60562.py` → TRUNCATE + load v `data_mos.items_60562` (bez purge i geom split) |
+| 03:00 | `data_mos` | Vse 8 ezhednevnykh eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
 | 06:00 | `vector_stroy_url_222` | Chitaet token iz `Vector_py/token.md`, skachivaet GeoJSON map221/rs_2022 s vector.mka.mos.ru, DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; pri otsutstvii tokena ili oshibke API — propusk |
 
@@ -16,7 +17,7 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 
 `genplan_fetch_uploaded` — po UUID iz `genplan.uploaded_photo` zabiraet meta iz MSI Holes (`GET /api/photos/meta/{uuid}`) i upsert v `genplan.photo_meta`. Ruchnoy zapusk: `--run genplan_fetch_uploaded`.
 
-Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
+Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 ezhednevnykh servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
 
 ### Servisy data.mos.ru
 
@@ -30,6 +31,7 @@ Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. P
 | `data_mos_1500` | `data_mos_export_1500.py` | `items_1500` | net |
 | `data_mos_2386` | `data_mos_export_2386.py` | `items_2386` | net |
 | `data_mos_62441` | `data_mos_export_62441.py` | `items_62441` | da |
+| `data_mos_60562` | `data_mos_export_60562.py` | `items_60562` | net (ezhemesyachno, bez geom split) |
 
 Kolonki v `data_mos.items_*` sozdayutsya **dinamicheski** iz klyuchey GeoJSON (snake_case). Bazovye polya: `id`, `geom`, `loaded_at`.
 
@@ -162,11 +164,14 @@ Dlya polnogo peresozdaniya pervykh chetyrekh tablits (DROP dannykh): `sql/04_dat
 ## Ruchnoy zapusk zadach
 
 ```bash
-# vse 8 eksportov podryad
+# vse 8 ezhednevnykh eksportov podryad
 docker compose exec collector python -m collector.scheduler --run data_mos
 
 # odin servis
 docker compose exec collector python -m collector.scheduler --run data_mos_1498
+
+# ezhemesyachnyy 60562 (bez purge/split)
+docker compose exec collector python -m collector.scheduler --run data_mos_60562
 
 # lens + stroymonitoring (kak v 04:00)
 docker compose exec collector python -m collector.scheduler --run lens_pipeline
@@ -308,7 +313,7 @@ docker compose exec collector python -m collector.scheduler --run genplan_downlo
 Peremennaya okruzheniya:
 
 ```
-GENPLAN_DOWNLOAD_HOOD_GIDS=20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124
+GENPLAN_DOWNLOAD_HOOD_GIDS=1,2,3,4,5,6,7,8,9,10,11,12,13,14,20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124,128,129,130
 ```
 
 Skachivanie na lokalnuyu mashinu s VPS:

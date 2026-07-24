@@ -39,3 +39,13 @@ CREATE INDEX IF NOT EXISTS idx_data_mos_items_62441_geom
     ON data_mos.items_62441 USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_data_mos_items_62441_loaded_at
     ON data_mos.items_62441 (loaded_at DESC);
+
+CREATE TABLE IF NOT EXISTS data_mos.items_60562 (
+    id         BIGSERIAL PRIMARY KEY,
+    geom       GEOMETRY(Geometry, 4326),
+    loaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_data_mos_items_60562_geom
+    ON data_mos.items_60562 USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_data_mos_items_60562_loaded_at
+    ON data_mos.items_60562 (loaded_at DESC);

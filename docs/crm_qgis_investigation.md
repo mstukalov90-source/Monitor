@@ -1,5 +1,9 @@
 # CRM/QGIS investigation checklist — crm.tasks deletions
 
+> **Handoff для WebCRM:** полное расследование и задачи на исправление —  
+> [`docs/webcrm_tasks_deletion_investigation.md`](webcrm_tasks_deletion_investigation.md)  
+> (корневая причина: `deploy/deploy.sh` повторно гоняет `sql/28_cleanup_link_orphan_tasks.sql`).
+
 External CRM/QGIS has direct PostgreSQL access to the same `monitor` database as MONITOR collector.
 
 ## Symptoms when CRM deletes tasks
@@ -33,7 +37,24 @@ ORDER BY deleted_at DESC
 LIMIT 50;
 ```
 
-Compare `application_name` and `db_user` with CRM service credentials.
+Compare `application_name`, `db_user`, and `client_addr` with CRM service credentials.
+
+Recent incidents (manual `psql` / `monitor`, SSH from `91.246.17.231`):
+
+| Date (MSK) | Deleted | Pattern |
+|---|---:|---|
+| 2026-07-13 15:04 | 25 093 | Two batches (~24.6k + 485 oati) |
+| 2026-07-16 10:12 | 26 958 | Two batches (~26.5k + 485 oati) |
+
+Наиболее вероятный источник: **WebCRM `deploy/deploy.sh`** (цикл `psql -f sql/*.sql`), в т.ч. `sql/28_cleanup_link_orphan_tasks.sql`. Подробности — в [`webcrm_tasks_deletion_investigation.md`](webcrm_tasks_deletion_investigation.md).
+
+## DB guard (sql/33)
+
+- `DELETE` blocked when `user_created` contains `'etl'` (MONITOR-owned tasks).
+- `crm.tasks_deletion_log.client_addr` records `inet_client_addr()` for allowed deletes.
+- `RAISE WARNING` when a single statement deletes more than 100 rows.
+
+Apply: `docker compose exec -T db psql -U monitor -d monitor < sql/33_crm_tasks_etl_delete_block.sql`
 
 ## Required CRM changes
 

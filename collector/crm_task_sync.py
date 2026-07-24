@@ -18,12 +18,21 @@ from collector.data_mos_tasked import refresh_all_tasked_parents
 
 logger = logging.getLogger(__name__)
 
+STATION_COLUMNS = ("sps", "kgs", "station_avr")
+
+_CLOSED_SNAPSHOT_TABLES = (
+    "crm.tasks_done_legal",
+    "crm.tasks_done_illegal",
+    "crm.tasks_clear",
+)
+
 
 @dataclass
 class CrmTaskSyncResult:
     inserted: int = 0
     linked: int = 0
     tasked_parents: int = 0
+    sent_to_field: int = 0
 
 
 def _task_id_conflict_clause(task_column: str) -> str:
@@ -119,6 +128,118 @@ def _link_split_rows(cur: Any, cfg: ServiceTaskSync, layer: SplitLayerSync) -> i
     return linked
 
 
+def _task_geom_rows_sql(cfg: ServiceTaskSync) -> str:
+    parts = [
+        f"""
+            SELECT t.task_key, t.geom
+            FROM {layer.items_table} t
+            WHERE t.task_key IS NOT NULL
+              AND t.geom IS NOT NULL
+        """
+        for layer in cfg.split_layers
+    ]
+    return " UNION ALL ".join(parts)
+
+
+def _closed_snapshot_exclusions() -> str:
+    return "\n".join(
+        f"""              AND NOT EXISTS (
+                  SELECT 1 FROM {table} closed
+                  WHERE closed.task_key = ct.key
+              )"""
+        for table in _CLOSED_SNAPSHOT_TABLES
+    )
+
+
+def _sync_tasks_to_field(cur: Any, cfg: ServiceTaskSync) -> int:
+    """Copy missing active unobserved service tasks into crm.tasks_field."""
+    task_column = cfg.task_column
+    audit = _etl_audit()
+    id_cols = ", ".join(f'ct."{col}"' for col in TASK_ID_COLUMNS)
+    station_cols = ", ".join(f'ct."{col}"' for col in STATION_COLUMNS)
+    insert_columns = (
+        ["task_key", "type"]
+        + list(TASK_ID_COLUMNS)
+        + list(STATION_COLUMNS)
+        + [
+            "is_field_data",
+            "is_office_task",
+            "user_created",
+            "user_last_edit",
+            "office_comment",
+            "rayon",
+        ]
+    )
+    col_list = ", ".join(f'"{col}"' for col in insert_columns)
+
+    # Fast insert first (rayon filled in a separate set-based UPDATE).
+    insert_query = f"""
+        INSERT INTO crm.tasks_field ({col_list})
+        SELECT
+            ct.key,
+            ct.type,
+            {id_cols},
+            {station_cols},
+            COALESCE(ct.is_field_data, false),
+            COALESCE(ct.is_office_task, false),
+            %s::text[],
+            %s::text[],
+            NULL,
+            NULL
+        FROM crm.tasks ct
+        WHERE ct."{task_column}" IS NOT NULL
+          AND ct.field_observed IS NOT TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM crm.tasks_field tf
+              WHERE tf.task_key = ct.key
+          )
+{_closed_snapshot_exclusions()}
+        ON CONFLICT (task_key) DO NOTHING
+    """
+    cur.execute(insert_query, [audit, audit])
+    inserted = cur.rowcount
+
+    geom_rows = _task_geom_rows_sql(cfg)
+    # Set-based rayon fill; rows without a hood match keep rayon NULL (legacy fallback).
+    rayon_query = f"""
+        UPDATE crm.tasks_field tf
+        SET rayon = src.rayon
+        FROM (
+            SELECT DISTINCT ON (g.task_key)
+                g.task_key,
+                NULLIF(btrim(h.rayon), '') AS rayon
+            FROM (
+                {geom_rows}
+            ) g
+            JOIN crm.tasks ct
+              ON ct.key = g.task_key
+             AND ct."{task_column}" IS NOT NULL
+             AND ct.field_observed IS NOT TRUE
+            JOIN odh_export.hood h
+              ON ST_Intersects(
+                  ST_SetSRID(ST_MakeValid(g.geom), 4326),
+                  h.geom
+              )
+            WHERE NULLIF(btrim(h.rayon), '') IS NOT NULL
+            ORDER BY g.task_key, h.rayon
+        ) src
+        WHERE tf.task_key = src.task_key
+          AND tf.rayon IS NULL
+          AND src.rayon IS NOT NULL
+    """
+    cur.execute("SAVEPOINT crm_task_field_rayon")
+    try:
+        cur.execute(rayon_query)
+        cur.execute("RELEASE SAVEPOINT crm_task_field_rayon")
+    except Exception:
+        logger.exception(
+            "crm_task_sync rayon fill failed for %s (tasks already inserted)",
+            task_column,
+        )
+        cur.execute("ROLLBACK TO SAVEPOINT crm_task_field_rayon")
+    return inserted
+
+
 def sync_crm_tasks_after_etl(cur: Any, parent_table_name: str) -> CrmTaskSyncResult:
     """Run after geom split for one data_mos service parent table."""
     cfg = SERVICE_TASK_SYNC.get(parent_table_name)
@@ -131,12 +252,14 @@ def sync_crm_tasks_after_etl(cur: Any, parent_table_name: str) -> CrmTaskSyncRes
         result.linked += _link_split_rows(cur, cfg, layer)
 
     result.tasked_parents = refresh_all_tasked_parents(cur, cfg.parent_table)
+    result.sent_to_field = _sync_tasks_to_field(cur, cfg)
 
     logger.info(
-        "crm_task_sync %s: inserted=%s linked=%s tasked_parents=%s",
+        "crm_task_sync %s: inserted=%s linked=%s tasked_parents=%s sent_to_field=%s",
         parent_table_name,
         result.inserted,
         result.linked,
         result.tasked_parents,
+        result.sent_to_field,
     )
     return result

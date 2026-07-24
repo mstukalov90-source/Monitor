@@ -36,14 +36,17 @@ def run() -> None:
                     totals.inserted += result.inserted
                     totals.linked += result.linked
                     totals.tasked_parents += result.tasked_parents
+                    totals.sent_to_field += result.sent_to_field
                     per_service.append(
                         f"{service_name}: inserted={result.inserted} "
-                        f"linked={result.linked} tasked_parents={result.tasked_parents}"
+                        f"linked={result.linked} tasked_parents={result.tasked_parents} "
+                        f"sent_to_field={result.sent_to_field}"
                     )
 
         message = (
             f"total inserted={totals.inserted} linked={totals.linked} "
-            f"tasked_parents={totals.tasked_parents}; "
+            f"tasked_parents={totals.tasked_parents} "
+            f"sent_to_field={totals.sent_to_field}; "
             + "; ".join(per_service)
         )
         with local_connection() as conn:
