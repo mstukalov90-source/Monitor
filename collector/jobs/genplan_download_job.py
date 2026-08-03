@@ -1,4 +1,4 @@
-"""Download genplan photos (disruption=true inside hood polygon) from MSI Holes API."""
+"""Download genplan photos (disruption=true) from MSI Holes API."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from psycopg2.extras import RealDictCursor
 
 from collector.config import (
     GENPLAN_DOWNLOAD_DIR,
-    GENPLAN_DOWNLOAD_HOOD_GIDS,
     MSI_HOLES_BASE_URL,
     MSI_HOLES_CLIENT_ID,
     MSI_HOLES_CLIENT_SECRET,
@@ -36,11 +35,6 @@ WHERE pm.disruption IS TRUE
   AND pm.uuid IS NOT NULL
   AND btrim(pm.uuid) <> ''
   AND pm.geom IS NOT NULL
-  AND EXISTS (
-    SELECT 1 FROM odh_export.hood h
-    WHERE h.gid = ANY(%(hood_gids)s)
-      AND ST_Within(pm.geom, h.geom)
-  )
 ORDER BY pm.loaded_at DESC
 """
 
@@ -55,10 +49,10 @@ def _require_credentials() -> None:
         )
 
 
-def _load_photo_rows(hood_gids: tuple[int, ...]) -> list[dict[str, Any]]:
+def _load_photo_rows() -> list[dict[str, Any]]:
     with local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(_PHOTO_ROWS_SQL, {"hood_gids": list(hood_gids)})
+            cur.execute(_PHOTO_ROWS_SQL)
             return list(cur.fetchall())
 
 
@@ -101,7 +95,6 @@ def _download_photo(api: MsiHolesClient, uuid: str, dest: Path) -> None:
 
 def run() -> None:
     _require_credentials()
-    hood_gids = GENPLAN_DOWNLOAD_HOOD_GIDS
     download_dir = GENPLAN_DOWNLOAD_DIR
     run_id = None
 
@@ -110,12 +103,12 @@ def run() -> None:
             conn,
             JOB_NAME,
             "running",
-            f"hood_gids={list(hood_gids)} -> {download_dir.name}/",
+            f"disruption=true -> {download_dir.name}/",
         )
 
-    rows = _load_photo_rows(hood_gids)
+    rows = _load_photo_rows()
     if not rows:
-        message = f"0 photo(s) matched disruption=true in hood gids={list(hood_gids)}"
+        message = "0 photo(s) matched disruption=true"
         with local_connection() as conn:
             log_job_run(
                 conn,

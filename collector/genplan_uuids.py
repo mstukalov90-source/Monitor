@@ -211,3 +211,46 @@ def load_uploaded_uuids_pending_meta(cur: Cursor) -> list[str]:
         )
 
     return [row[0] for row in cur.fetchall()]
+
+
+def load_uuid_api_uuids_pending_meta(cur: Cursor) -> list[str]:
+    """Return uuid_api UUIDs missing from photo_meta or not yet done."""
+    if not _table_exists(cur, "genplan", "uuid_api"):
+        return []
+
+    has_status = _table_has_column(cur, "genplan", "photo_meta", "status")
+    has_pm_uuid = _table_has_column(cur, "genplan", "photo_meta", "uuid")
+
+    if has_pm_uuid and has_status:
+        cur.execute(
+            """
+            SELECT ua.uuid
+            FROM genplan.uuid_api ua
+            LEFT JOIN genplan.photo_meta pm ON pm.uuid = ua.uuid
+            WHERE ua.uuid IS NOT NULL AND btrim(ua.uuid) <> ''
+              AND (pm.uuid IS NULL OR pm.status IS DISTINCT FROM 'done')
+            ORDER BY ua.loaded_at
+            """
+        )
+    elif has_pm_uuid:
+        cur.execute(
+            """
+            SELECT ua.uuid
+            FROM genplan.uuid_api ua
+            LEFT JOIN genplan.photo_meta pm ON pm.uuid = ua.uuid
+            WHERE ua.uuid IS NOT NULL AND btrim(ua.uuid) <> ''
+              AND pm.uuid IS NULL
+            ORDER BY ua.loaded_at
+            """
+        )
+    else:
+        cur.execute(
+            """
+            SELECT ua.uuid
+            FROM genplan.uuid_api ua
+            WHERE ua.uuid IS NOT NULL AND btrim(ua.uuid) <> ''
+            ORDER BY ua.loaded_at
+            """
+        )
+
+    return [row[0] for row in cur.fetchall()]
