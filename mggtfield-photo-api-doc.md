@@ -8,19 +8,19 @@ API принимает **бинарные файлы** JPEG/PNG с мобиль�
 
 | Параметр | Значение |
 |----------|----------|
-| Base URL | `http://77.222.63.161:8000` |
+| Base URL | `http://172.21.198.219:8000` |
 | Протокол | HTTP (без TLS) |
 | Auth | `Authorization: Bearer <MONITOR_API_KEY>` |
 
 Ключ — 256-битный секрет (64 hex-символа), выдаётся администратором MONITOR. Не вставляйте ключ в URL и не храните в git.
 
-Порт `8000` на сервере должен быть доступен с IP устройства или офиса разработчика (firewall на VPS).
+Порт `8000` доступен из корпсети / VPN-app на планшете (прод `172.21.198.219`).
 
 ## Загрузка фотографии
 
 **Запрос:**
 
-`POST http://77.222.63.161:8000/api/mggtfield/photos`
+`POST http://172.21.198.219:8000/api/mggtfield/photos`
 
 **Заголовки:**
 
@@ -38,7 +38,7 @@ Accept: application/json
 **Пример (curl):**
 
 ```bash
-export MONITOR_BASE_URL="http://77.222.63.161:8000"
+export MONITOR_BASE_URL="http://172.21.198.219:8000"
 export MONITOR_API_KEY="<ключ_от_администратора>"
 
 curl -s -w "\nHTTP %{http_code}\n" -X POST \
@@ -156,7 +156,7 @@ data class FieldPhotoUploadResponse(
 
 ## Проверка доступности
 
-`GET http://77.222.63.161:8000/health` — без авторизации, ответ `{"status":"ok"}`.
+`GET http://172.21.198.219:8000/health` — без авторизации, ответ `{"status":"ok"}`.
 
 ## Рекомендуемый сценарий интеграции
 

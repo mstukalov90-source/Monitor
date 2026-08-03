@@ -1,10 +1,14 @@
 # MONITOR — статус доступности функций
 
-**Основной сервер:** **MONITOR Внутренний** — `172.21.198.219` (`LEN-MOSTRRAB-DCR-01P`, RED OS 8.0.2)  
+**Основной (прод) сервер:** **MONITOR** — `172.21.198.219` (`LEN-MOSTRRAB-DCR-01P`, RED OS 8.0.2)  
 **Путь проекта:** `/opt/monitor`  
-**Дата проверки:** 2026-07-01 (MSK)  
-**Предыдущий сервер:** **SWEB** — `77.222.63.161` (MONITOR **ещё запущен**)  
-**Рабочая станция:** **MONITOR Внешний** — `172.21.198.222` (`LEN-MONSTRRAB-01P`, только SSH)
+**Дата проверки:** 2026-08-03 (MSK)  
+**Архитектура:** один сервер **без DMZ-прослойки** (схема `mggt-DMZ/` устарела; план переезда — [`mggt_server/`](mggt_server/))  
+**Публичный доступ (только API смежников):** `https://monitor-crm.mggt.ru` — **ok** (с SWEB: `/health` 200, `PUT /api/uuids` 201 → БД `.219`)  
+**DNS:** интернет → `91.246.17.237`, корпсеть → `192.168.1.217`  
+**Статус:** **основной прод** = `172.21.198.219`. Resync с SWEB ([`STAGE_FINAL_RESYNC_REPORT.md`](mggt_server/STAGE_FINAL_RESYNC_REPORT.md)): `crm.tasks` **46439**, WebCRM `index-0s08xR2m.js`. Пакет смежникам: [`mggt_server/API/`](mggt_server/API/).  
+**Тестовый сервер:** **SWEB** — `77.222.63.161` (бывший прод; только тест)  
+**MONITOR Внешний:** `172.21.198.222` (`LEN-MONSTRRAB-01P`) — **не используется** в прод-схеме
 
 ---
 
@@ -12,27 +16,41 @@
 
 | Имя | IP | Hostname | Роль | Сервисы |
 |-----|-----|----------|------|---------|
-| **MONITOR Внутренний** | `172.21.198.219` | `LEN-MOSTRRAB-DCR-01P` | Prod, внутренняя сеть | SSH `:22`, MONITOR API `:8000`, PG `:5432` |
-| **SWEB** | `77.222.63.161` | `77-222-63-161.swtest.ru` | Публичный интернет | SSH `:22`, MONITOR API `:8000`, PG `:5432` |
-| **MONITOR Внешний** | `172.21.198.222` | `LEN-MONSTRRAB-01P` | Администрирование | SSH `:22` |
+| **MONITOR** | `172.21.198.219` | `LEN-MOSTRRAB-DCR-01P` | **Прод**, корпсеть | SSH `:22`, nginx `:80` (WebCRM), M2M API `:8000`, PG `:5432` |
+| **Шлюз MGGT (внутр.)** | `192.168.1.217` | — | Split-horizon DNS / HTTP→HTTPS | `monitor-crm.mggt.ru` внутри сети |
+| **Публичный IP домена** | `91.246.17.237` | — | Интернет HTTPS → `.219` | `/health` **ok**; M2M API live |
+| **SWEB** | `77.222.63.161` | `77-222-63-161.swtest.ru` | **Тест** | SSH `:22`, MONITOR API `:8000`, PG `:5432`, WebCRM |
+| **MONITOR Внешний** | `172.21.198.222` | `LEN-MONSTRRAB-01P` | Не используется (ex-DMZ) | SSH `:22` (на 2026-07-28 недоступен) |
 | **web_geo** | `172.21.198.149` | — | Внешняя БД | PostgreSQL `:5432` |
 | **SPS** | `172.16.206.170` | — | Внешняя БД | PostgreSQL `:5432` |
-| **Mac** | VPN | — | Разработка / деплой | SSH ко всем серверам |
+| **Mac** | VPN | — | Разработка / деплой | SSH к прод и SWEB |
 
-SSH к SWEB: `ssh -i id_rsa/id_rsa root@77.222.63.161`
+SSH к SWEB: `ssh -i id_rsa/id_rsa root@77.222.63.161`  
+SSH к прод: `ssh root@172.21.198.219`
+
+### Доступ потребителей
+
+| Потребитель | Канал | Адрес |
+|-------------|-------|-------|
+| Смежники (genplan M2M) | Интернет HTTPS | `https://monitor-crm.mggt.ru` ([`mggt_server/API/`](mggt_server/API/)) |
+| WebCRM | Корпсеть / VPN | `http://172.21.198.219/` (bundle `index-0s08xR2m.js`) |
+| Android (API + PG) | Корпсеть (VPN-приложение → LAN) | API `http://172.21.198.219:8000`, PG `172.21.198.219:5432` (TCP smoke ok) |
+| Админы | VPN / SSH | `root@172.21.198.219` |
 
 ### API в проекте
 
-**MONITOR M2M API** (входящие, на SWEB и MONITOR Внутренний, порт `:8000`):
+Handoff для смежников: [`mggt_server/API/`](mggt_server/API/) (ONBOARDING, контракты, клиент; ключ — `credentials.local.md`, не в git).
+
+**MONITOR M2M API** (входящие, порт `:8000` на сервере; снаружи через домен `:443`):
 
 | Endpoint | Назначение |
 |----------|------------|
 | `GET /health` | Проверка доступности |
 | `PUT /api/photos/meta/{uuid}` | Приём метаданных фото (genplan) |
 | `PUT /api/uuids/{uuid}` | Регистрация UUID фото |
-| `POST /api/mggtfield/photos` | Загрузка полевых фото (Android) |
+| `POST /api/mggtfield/photos` | Загрузка полевых фото (Android, VPN) |
 
-**Внешние API** (исходящие, collector на MONITOR Внутренний / SWEB):
+**Внешние API** (исходящие, collector на MONITOR / SWEB):
 
 | Сервис | Base URL | Endpoints | Job |
 |--------|----------|-----------|-----|
@@ -50,12 +68,14 @@ flowchart TB
     MAC["Mac<br/>VPN · разработка"]
 
     subgraph Internet["Публичный интернет"]
-        SWEB["SWEB · 77.222.63.161<br/>─────────────<br/>GET /health<br/>PUT /api/photos/meta/{uuid}<br/>PUT /api/uuids/{uuid}<br/>POST /api/mggtfield/photos<br/>─────────────<br/>PG :5432"]
+        Colleagues["Смежники M2M"]
+        GW["Шлюз · 192.168.1.217<br/>monitor-crm.mggt.ru:443"]
+        SWEB["SWEB · 77.222.63.161<br/>ТЕСТ<br/>API :8000 · PG :5432"]
     end
 
     subgraph CorpLAN["Корпоративная сеть 172.21.198.0/24"]
-        MON_INT["MONITOR Внутренний · 172.21.198.219<br/>─────────────<br/>GET /health<br/>PUT /api/photos/meta/{uuid}<br/>PUT /api/uuids/{uuid}<br/>POST /api/mggtfield/photos<br/>─────────────<br/>PG :5432"]
-        MON_EXT["MONITOR Внешний · 172.21.198.222<br/>SSH :22"]
+        MON["MONITOR · 172.21.198.219 · ПРОД<br/>─────────────<br/>nginx :80 WebCRM<br/>M2M API :8000<br/>PG :5432<br/>collector"]
+        MON_EXT["MONITOR Внешний · 172.21.198.222<br/>не используется"]
         WEBGEO["web_geo · 172.21.198.149<br/>PG :5432"]
     end
 
@@ -64,86 +84,82 @@ flowchart TB
     end
 
     subgraph ExtAPI["Внешние API"]
-        MSI["MSI Holes · m2m.msi-holes.cxm.dev<br/>POST /spatial_search<br/>GET /api/photos/meta/{uuid}<br/>POST /api/upload<br/>GET /api/photos/images/{uuid}"]
-        OAUTH["OAuth · id.cxm.dev<br/>POST /oauth2/token"]
-        DATAMOS["data.mos.ru · apidata.mos.ru<br/>GET /v1/datasets/{id}/features"]
-        VECTORMKA["vector.mka.mos.ru<br/>GET .../map221/rs_2022/export/"]
+        MSI["MSI Holes · m2m.msi-holes.cxm.dev"]
+        OAUTH["OAuth · id.cxm.dev"]
+        DATAMOS["data.mos.ru"]
+        VECTORMKA["vector.mka.mos.ru"]
     end
 
+    Colleagues -->|HTTPS| GW
+    GW -->|прокси M2M| MON
+
     MAC <-->|SSH| SWEB
-    MAC <-->|SSH| MON_INT
-    MAC -->|SSH| MON_EXT
+    MAC <-->|SSH| MON
 
-    MON_INT <-->|SSH · API · PG| SWEB
-    MON_INT <-->|SSH| MON_EXT
-    MON_INT -->|lens_sync| SPS
-    MON_INT -->|stroymonitoring_sync| WEBGEO
-    MON_INT --> MSI
-    MON_INT --> OAUTH
-    MON_INT --> DATAMOS
-    MON_INT --> VECTORMKA
-
-    MON_EXT -->|SSH · API · PG| MON_INT
-    MON_EXT -->|PG| SPS
-    MON_EXT -->|PG| WEBGEO
+    MON -->|lens_sync| SPS
+    MON -->|stroymonitoring_sync| WEBGEO
+    MON --> MSI
+    MON --> OAUTH
+    MON --> DATAMOS
+    MON --> VECTORMKA
 
     SWEB --> MSI
     SWEB --> OAUTH
     SWEB --> DATAMOS
 
-    SWEB -.->|нет маршрута| MON_INT
-    SWEB -.->|нет маршрута| MON_EXT
-    MON_EXT -.->|нет выхода| SWEB
+    SWEB -.->|нет маршрута| MON
+    MON_EXT -.->|не в схеме| MON
 ```
 
 ### ASCII-схема (кратко)
 
 ```
-                         ┌── Внешние API ──────────────────────────────┐
-                         │ MSI Holes · OAuth · data.mos.ru · vector.mka│
-                         └────────▲───────────────────▲──────────────────┘
-                                  │                   │
-                    ┌─────────────┴───────┐   ┌───────┴──────────────┐
-                    │ SWEB                │   │ MONITOR Внутренний   │
-  Mac ──SSH────────►│ 77.222.63.161       │◄─►│ 172.21.198.219       │
-  Mac ──SSH────────►│ MONITOR API :8000   │   │ MONITOR API :8000    │
-  Mac ──SSH────────►│ PG :5432            │   │ PG :5432             │
-                    └──────────┬──────────┘   └──────┬───────────────┘
-                               │ X (нет маршрута)    │
-                               │                     ├──► SPS :5432
-                               │                     ├──► web_geo :5432
-                               │                     │
-                               │              ┌──────▼───────────────┐
-                               │              │ MONITOR Внешний      │
-                               └── X ◄────────│ 172.21.198.222       │
-                                 (нет выхода) │ SSH :22              │
-                                              └──────────────────────┘
+  Интернет (смежники)          Корпсеть / VPN
+         │                            │
+         ▼                            ├── WebCRM  → http://172.21.198.219/
+  monitor-crm.mggt.ru:443             ├── Android → :8000 + PG :5432
+  (шлюз 192.168.1.217)                └── админы  → SSH
+         │
+         ▼
+  ┌──────────────────────────────────────────┐
+  │ MONITOR ПРОД · 172.21.198.219            │
+  │  nginx :80 (WebCRM)                      │
+  │  monitor-api :8000 · monitor-db :5432    │
+  │  collector → SPS / web_geo / ext API     │
+  └──────────────────────────────────────────┘
 
-MONITOR API (на SWEB и MONITOR Внутренний):
+  SWEB 77.222.63.161 — ТЕСТ (не прод)
+
+M2M API:
   GET  /health
   PUT  /api/photos/meta/{uuid}
   PUT  /api/uuids/{uuid}
-  POST /api/mggtfield/photos
+  POST /api/mggtfield/photos   (Android, VPN)
 ```
 
 **Ключевые выводы:**
-- Прямой связи **SWEB ↔ корпоративная сеть** нет.
-- **MONITOR Внутренний** — единственный узел, который видит SWEB, внутренние БД и внешние API.
-- **MONITOR Внешний** — во внутренней сети, MONITOR Внутренний доступен, SWEB — нет.
-- **Mac** (VPN) — SSH ко всем трём серверам; основной путь миграции и администрирования.
+- Прод — **один** узел `172.21.198.219`, без nginx-прокси на `.222`.
+- Снаружи M2M — `https://monitor-crm.mggt.ru` (**ok** с 2026-08-03; проверка с SWEB).
+- WebCRM и Android — **корпсеть**; Android VPN-приложение = LAN с полным доступом к серверу.
+- SWEB — **тестовый** стенд (бывший прод); прямого маршрута SWEB ↔ корпсеть нет.
+- Конфиг: [`mggt_server/SERVER.md`](mggt_server/SERVER.md), переезд: [`mggt_server/MIGRATION.md`](mggt_server/MIGRATION.md).
 
 ---
 
-## Инфраструктура
+## Инфраструктура (прод `172.21.198.219`, 2026-08-03)
 
 | Компонент | Статус | Детали |
 |-----------|--------|--------|
-| Диск `/` | OK | 489 GB всего, ~13 GB занято, **~457 GB свободно** (3%) |
-| `monitor-db` | OK | PostGIS 16-3.4, healthy, порт `5432` |
-| `monitor-api` | OK | Uvicorn, порт `8000` |
-| `monitor-collector` | OK | APScheduler, cron 03:00 / 04:00 / 06:00 MSK |
-| API с Mac | OK | `curl http://172.21.198.219:8000/health` → `{"status":"ok"}` |
-| Firewall | Не настроен | `firewalld` inactive; порты `5432`, `8000` на `0.0.0.0` |
+| CPU / RAM | OK | 4 vCPU (AMD EPYC 7763), 15 GiB RAM, ~9.6 GiB swap |
+| Диск `/` | OK | 489 GB |
+| `nginx` | OK | `:80` — M2M → `:8000`; WebCRM `/api/` → `:8080` |
+| `monitor-webcrm` | OK | uvicorn `:8080`; `DB_HOST=127.0.0.1`; SPA `index-0s08xR2m.js` |
+| `monitor-db` | **OK** | PostGIS 16-3.4, healthy `:5432`; resync SWEB 2026-08-03 |
+| `monitor-api` | **OK** | `:8000` `/health` → ok |
+| `monitor-collector` | **OK** | Up |
+| CRM | OK | `tasks` **46439** (= SWEB fingerprint) |
+| Firewall | Active | corp `172.21.0.0/16` → 80/8000/5432; шлюз `192.168.1.217` → 80/8000 |
+| Публичный TLS | Край `91.246.17.237` | **ok** → бэкенд `.219:80` |
 
 ---
 
@@ -151,18 +167,17 @@ MONITOR API (на SWEB и MONITOR Внутренний):
 
 | Функция | Endpoint | Статус | Проверка |
 |---------|----------|--------|----------|
-| Health | `GET /health` | **OK** | Без авторизации, `{"status":"ok"}` |
-| Photo meta ingest | `PUT /api/photos/meta/{uuid}` | **OK** | С `Authorization: Bearer <MONITOR_API_KEY>` → `201 created` / `200 updated`; запись в `genplan.photo_meta` |
-| Photo meta auth | без ключа | **OK** | `401 Missing or invalid Authorization header` |
-| Photo meta auth | неверный ключ | **OK** | `401 Invalid API key` |
-| UUID ingest | `PUT /api/uuids/{uuid}` | **OK** | Первая отправка → `201`; повтор → `409 uuid already exists`; запись в `genplan.uuid_api` |
-| Полевые фото (Android) | `POST /api/mggtfield/photos` | **OK** | Multipart `file` → `201`, файл в `/opt/monitor/mggtfield_photo/` |
-| Полевые фото | без файла | **OK** | `422 Field required` (валидация) |
+| Health | `GET /health` | **OK** публично и на `.219` | `{"status":"ok"}` |
+| Photo meta ingest | `PUT /api/photos/meta/{uuid}` | **OK** прод-домен | Bearer `MONITOR_API_KEY` |
+| UUID ingest | `PUT /api/uuids/{uuid}` | **OK** прод-домен | с SWEB: **201** → `genplan.uuid_api` на `.219` |
+| Полевые фото (Android) | `POST /api/mggtfield/photos` | VPN → `.219:8000` | Multipart `file` |
 
-**Base URL для коллег:** `http://172.21.198.219:8000`  
-**Ключ API:** без изменений (из `.env` старого сервера)
+**Base URL для смежников (прод):** `https://monitor-crm.mggt.ru`  
+**Base URL внутри VPN:** `http://172.21.198.219:8000`  
+**Ключ API:** без изменений (из `.env` / [`mggt_server/API/credentials.local.md`](mggt_server/API/credentials.local.md))  
+**Тест (SWEB):** `http://77.222.63.161:8000` — не использовать для прода
 
-### Данные API в БД (на момент проверки)
+### Данные API в БД (последняя проверка на `.219` до остановки Docker, 2026-07-01)
 
 | Таблица | Строк |
 |---------|------:|
@@ -175,144 +190,70 @@ MONITOR API (на SWEB и MONITOR Внутренний):
 
 ## ETL Jobs — планировщик
 
+На прод-сервере collector **остановлен** с 21.07.2026. Ниже — статус последней рабочей проверки (2026-07-01) и ожидание после `docker compose up -d`.
+
 ### Cron (автоматические)
 
-| Время MSK | Job | Статус | Комментарий |
-|-----------|-----|--------|-------------|
-| 03:00 | `data_mos` | **OK** | Цепочка 8 экспортов + `ogh_disruption`; проверены `data_mos_2941`, `data_mos_2855` — success |
-| 03:00 | `data_mos_2855` | **OK** | 3204 features, purge, geom split |
-| 03:00 | `data_mos_2941` | **OK** | 1980 features, purge 561 |
-| 03:00 | `data_mos_62461` | **OK*** | Последний успешный прогон 23.06 03:00 (данные с миграции) |
-| 03:00 | `data_mos_62501` | **OK*** | То же |
-| 03:00 | `data_mos_1498` | **OK*** | То же |
-| 03:00 | `data_mos_1500` | **OK*** | То же |
-| 03:00 | `data_mos_2386` | **OK*** | То же |
-| 03:00 | `data_mos_62441` | **OK*** | То же |
-| 03:00 | `ogh_disruption` | **OK** | Skip если нет `mggt_dgn/mggt_dgn.geojson` |
-| 04:00 | `lens_pipeline` | **OK** | `lens_sync` → `stroymonitoring_sync` |
-| 04:00 | `lens_sync` | **OK** | 11 таблиц, ~1.19M строк, purge 1769 reports |
-| 04:00 | `stroymonitoring_sync` | **OK** | 1921 rows, purge 588 |
-| 06:00 | `vector_stroy_url_222` | **OK** | Skip если нет `url_222_wgs.geojson` в корне проекта |
+| Время MSK | Job | Статус (на 01.07) | Комментарий |
+|-----------|-----|-------------------|-------------|
+| 03:00 | `data_mos` (+ 8 датасетов, `ogh_disruption`) | **OK*** | Нужен повторный прогон после подъёма |
+| 04:00 | `lens_pipeline` / `lens_sync` / `stroymonitoring_sync` | **OK*** | SPS / web_geo доступны с `.219` |
+| 06:00 | `vector_stroy_url_222` | **OK*** | Skip без `url_222_wgs.geojson` |
 
-\* Остальные `data_mos_*` не перезапускались вручную в этой сессии, но успешно отработали на старом сервере 23.06 03:00 MSK; инфраструктура и `data_mos_2855`/`2941` подтверждены на новом.
+\* Подтверждено до остановки контейнеров; после подъёма — проверить `collector.job_runs`.
 
 ### Ручные jobs
 
 | Job | Статус | Комментарий |
 |-----|--------|-------------|
-| `genplan` | **OK** | Импорт JSON из `jsons_genplan/`; сейчас нет файлов → skip |
-| `genplan_upload` | **OK** | Загрузка в MSI Holes из `photo_to_upload/`; сейчас нет новых фото |
-| `genplan_fetch_uploaded` | **OK** | 66 UUID → meta upsert из MSI Holes `GET /api/photos/meta/{uuid}` |
-| `genplan_download` | **OK** | 118 фото matched, все уже на диске в `downloaded_photo/` |
-| `genplan_fetch` | **FAIL** | MSI Holes `POST /api/spatial_search` → **HTTP 404** |
-| `genplan_pipeline` | **FAIL** | Падает на `genplan_fetch` (404 spatial_search) |
-| `genplan_upload_pipeline` | **Частично** | `genplan_upload` + `genplan_fetch_uploaded` + `genplan` — upload skip, fetch_uploaded OK; полный pipeline без spatial_search работает через upload-ветку |
+| `genplan`, `genplan_upload`, `genplan_fetch_uploaded`, `genplan_download` | **OK*** | До остановки |
+| `genplan_fetch` / `genplan_pipeline` | **FAIL** | MSI Holes `POST /api/spatial_search` → **HTTP 404** (не связано с миграцией) |
 
 ---
 
 ## Внешние зависимости
 
-| Ресурс | Хост | Статус | Назначение |
-|--------|------|--------|------------|
-| SPS (lens) | `172.16.206.170:5432` | **OK** | `lens_sync` |
+| Ресурс | Хост | Статус с `.219` | Назначение |
+|--------|------|-----------------|------------|
+| SPS (lens) | `172.16.206.170:5432` | **OK** (корпсеть) | `lens_sync` |
 | web_geo | `172.21.198.149:5432` | **OK** | `stroymonitoring_sync` |
-| MSI Holes API | `https://m2m.msi-holes.cxm.dev` | **Частично** | `GET /api/photos/meta/{uuid}` — OK; `POST /api/spatial_search` — **404** |
-| MSI Holes OAuth | `https://id.cxm.dev/oauth2/token` | **OK** | Токен для MSI Holes (используется в fetch_uploaded) |
-| data.mos.ru | `https://apidata.mos.ru` | **OK** | HTTP 401 без ключа — сервер доступен; ключ в `.env` |
+| MSI Holes API | `https://m2m.msi-holes.cxm.dev` | **Частично** | meta OK; spatial_search **404** |
+| MSI Holes OAuth | `https://id.cxm.dev/oauth2/token` | **OK** | токен |
+| data.mos.ru | `https://apidata.mos.ru` | **OK** | ключ в `.env` |
 
 ---
 
 ## Сетевая доступность
 
-Проверка **2026-07-01**: зонд с Mac, **SWEB** (`77.222.63.161`), **MONITOR Внутренний** (`172.21.198.219`) и **MONITOR Внешний** (`172.21.198.222`). Таймаут TCP: 2 с.
+Проверка **2026-07-28**: зонд с Mac (VPN) и с **MONITOR** (`172.21.198.219`).
 
-### Матрица связности (MONITOR API / SSH / PG)
+### Матрица связности (актуально)
 
-| Откуда ↓ / Куда → | SWEB `:22` | SWEB `:8000` | SWEB `:5432` | Внутр. `:22` | Внутр. `:8000` | Внутр. `:5432` | Внешн. `:22` | SPS `:5432` | web_geo `:5432` |
-|-------------------|------------|--------------|--------------|--------------|----------------|----------------|--------------|-------------|-----------------|
-| **Mac** (VPN) | OK | OK (200) | OK | OK | OK (200) | OK | OK | OK | OK |
-| **SWEB** `.161` | OK | OK (200) | OK | **FAIL** | **FAIL** | **FAIL** | **FAIL** | **FAIL** | **FAIL** |
-| **MONITOR Внутренний** `.219` | OK | OK (200) | OK | OK | OK (200) | OK | OK | OK | OK |
-| **MONITOR Внешний** `.222` | **FAIL** | **FAIL** | **FAIL** | OK | OK (200) | OK | OK | OK | OK |
+| Откуда ↓ / Куда → | SWEB `:22` / `:8000` | MONITOR `:22` / `:80` | MONITOR `:8000` / `:5432` | SPS / web_geo |
+|-------------------|----------------------|------------------------|---------------------------|---------------|
+| **Mac** (VPN) | OK | OK / WebCRM OK | после подъёма Docker | OK |
+| **MONITOR** `.219` | OK (исходящий) | локально | после подъёма | OK |
+| **SWEB** `.161` | локально | **FAIL** (нет маршрута в корпсеть) | **FAIL** | **FAIL** |
 
-### Ping
-
-| Откуда ↓ / Куда → | SWEB | MONITOR Внутренний | MONITOR Внешний | SPS | web_geo |
-|-------------------|------|--------------------|-----------------|-----|---------|
-| **Mac** | OK | OK | OK | OK | OK |
-| **SWEB** | OK | **FAIL** | **FAIL** | **FAIL** | **FAIL** |
-| **MONITOR Внутренний** | OK | OK | OK | OK | OK |
-| **MONITOR Внешний** | **FAIL** | OK | OK | OK | OK |
-
-### SWEB → внутренняя сеть (недоступен)
-
-SWEB в публичном интернете; узлы `172.21.x` и `172.16.x` — только во внутренних сетях.
-
-| Проверка с **SWEB** | Результат |
-|---------------------|-----------|
-| Ping `172.21.198.219`, `172.21.198.222` | **FAIL** |
-| TCP 22, 5432, 8000 к `.219`, `.222` | **FAIL** |
-| `curl http://172.21.198.219:8000/health` | **FAIL** |
-| SPS / web_geo `:5432` | **FAIL** (timeout) |
-
-Со SWEB **нельзя** достучаться до внутренней сети. Миграция идёт через Mac или MONITOR Внутренний.
-
-### MONITOR Внутренний → SWEB (доступен)
-
-С `172.21.198.219` исходящий доступ к SWEB **работает** (корпоративный шлюз):
+### Публичный домен (актуально 2026-08-03)
 
 | Проверка | Результат |
 |----------|-----------|
-| Ping `77.222.63.161` | **OK** |
-| TCP `:22`, `:8000`, `:5432` | **OK** |
-| `curl http://77.222.63.161:8000/health` | **200** |
+| DNS с интернета (SWEB) | **`91.246.17.237`** |
+| DNS с `.219` | **`192.168.1.217`** |
+| HTTPS с SWEB на домен | **ok** — `/health` 200; `PUT /api/uuids` 201 → БД `.219` |
+| Backend на `.219` | nginx **`:80`** → M2M `:8000` |
 
-### MONITOR Внешний `172.21.198.222`
+### Входящие доступы к MONITOR
 
-| Параметр | Значение |
-|----------|----------|
-| Hostname | `LEN-MONSTRRAB-01P` |
-| Сервисы | только SSH `:22` |
-| Docker / MONITOR | не установлен |
-| → MONITOR Внутренний `.219` | SSH, API, PG — **OK** |
-| → SPS, web_geo | PG — **OK** |
-| → SWEB `.161` | **FAIL** (нет выхода в интернет / маршрута) |
+| Порт | Сервис | Кто имеет доступ |
+|------|--------|------------------|
+| 22 | SSH | админы (VPN) |
+| 80 | nginx (SPA + M2M proxy) | корпсеть `172.21.0.0/16`; шлюз `192.168.1.217` |
+| 8000 | MONITOR M2M API | корпсеть; шлюз |
+| 5432 | PostgreSQL | **только** корпсеть / localhost — **не** в интернет |
 
-### Исходящие доступы
-
-| Ресурс | SWEB | MONITOR Внутренний | MONITOR Внешний |
-|--------|------|--------------------|-----------------|
-| SPS `172.16.206.170:5432` | **FAIL** | **OK** | **OK** |
-| web_geo `172.21.198.149:5432` | **FAIL** | **OK** | **OK** |
-| SWEB MONITOR `:8000` / `:5432` | — (локально) | **OK** | **FAIL** |
-| MONITOR Внутренний `.219` `:8000` | **FAIL** | — | **OK** |
-| MSI Holes / OAuth `:443` | OK | OK | — |
-| data.mos.ru `:443` | OK | OK | — |
-| vector.mka.mos.ru `:443` | **FAIL** | OK* | — |
-
-\* На SWEB vector.mka недоступен — GeoJSON загружают локально и копируют на сервер.
-
-На **MONITOR Внутренний** и **MONITOR Внешний** `lens_sync` / `stroymonitoring_sync` работают — они в корпоративной сети вместе с SPS и web_geo. На **SWEB** эти БД недоступны.
-
-### Входящие доступы к MONITOR Внутренний
-
-| Порт | Сервис | Интерфейс |
-|------|--------|-----------|
-| 22 | SSH | `0.0.0.0` |
-| 5432 | PostgreSQL (`monitor-db`) | `0.0.0.0` |
-| 8000 | MONITOR M2M API | `0.0.0.0` |
-
-| Откуда | API `:8000` | PG `:5432` | Комментарий |
-|--------|-------------|------------|-------------|
-| Внутренняя сеть `172.21.x` / VPN | OK | OK* | основной сценарий |
-| MONITOR Внешний `.222` | OK | OK | |
-| Mac (VPN) | OK | OK | |
-| Публичный интернет | **Нет** | **Нет** | нет публичного IP |
-| SWEB `77.222.63.161` | **Нет** | **Нет** | другая сеть, маршрута нет |
-
-\* PostgreSQL с внешних клиентов — порт слушает на всех интерфейсах; рекомендуется ограничить firewall.
-
-**Важно для коллег:** `http://172.21.198.219:8000` — только из внутренней сети или VPN. Публичный адрес SWEB: `http://77.222.63.161:8000` (MONITOR там ещё работает).
+**Важно:** прод M2M — `https://monitor-crm.mggt.ru`. VPN: `http://172.21.198.219:8000`. Тест: `http://77.222.63.161:8000`.
 
 ---
 
@@ -320,7 +261,7 @@ SWEB в публичном интернете; узлы `172.21.x` и `172.16.x`
 
 | Схема | Таблиц | Статус |
 |-------|-------:|--------|
-| `data_mos` | 20 | OK |
+| `data_mos` | 20 | OK (данные в volume) |
 | `lens` | 11 | OK |
 | `genplan` | 5 | OK |
 | `stroymonitoring` | 1 | OK |
@@ -335,99 +276,89 @@ SWEB в публичном интернете; узлы `172.21.x` и `172.16.x`
 
 | Путь | Статус | Комментарий |
 |------|--------|-------------|
-| `/opt/monitor/.env` | OK | `MONITOR_API_PUBLIC_BASE_URL=http://172.21.198.219:8000` |
-| `genplan api/msi-holes-backend.client.json` | OK | OAuth credentials |
-| `mggtfield_photo/` | OK | 5+ файлов, upload проверен |
-| `downloaded_photo/` | OK | 334 файла |
-| `jsons_genplan/` | Пусто | `genplan` job ждёт JSON |
-| `photo_to_upload/` | Пусто | `genplan_upload` ждёт фото |
-| `mggt_dgn/mggt_dgn.geojson` | Нет | `ogh_disruption` skip |
-| `url_222_wgs.geojson` | Нет | `vector_stroy_url_222` skip |
+| `/opt/monitor/.env` | OK | `MONITOR_API_PUBLIC_BASE_URL` — обновить на `https://monitor-crm.mggt.ru` при cutover |
+| `/opt/monitor/webcrm/` | OK | код WebCRM; backend `.env` пока на SWEB |
+| `/var/www/monitor-webcrm/` | OK | собранный frontend |
+| `mggtfield_photo/` | OK | локальные полевые фото |
+| `downloaded_photo/` | OK | ~117 MB |
+| `jsons_genplan/` / `photo_to_upload/` | Пусто / skip | jobs ждут файлы |
 
 ---
 
 ## Известные проблемы
 
-### 1. `genplan_fetch` / `genplan_pipeline` — MSI Holes 404
+### 1. Docker-стек на прод остановлен (с 21.07.2026)
 
-```
-Client error '404 Not Found' for url 'https://m2m.msi-holes.cxm.dev/api/spatial_search'
-```
+**Снято этапом 1 (2026-07-28):** volume wipe + restore с SWEB; `monitor-db` / `api` / `collector` Up.
 
-Проблема **не связана с миграцией** — та же ошибка была на старом сервере. Push-канал через M2M API (`PUT /api/photos/meta/{uuid}`) и `genplan_fetch_uploaded` работают.
+### 2. WebCRM смотрит на БД SWEB
 
-**Обходной путь:** использовать M2M API коллег + `genplan_fetch_uploaded` для загруженных фото.
+**Снято этапом 1:** `DB_HOST=127.0.0.1`, `PHOTO_SFTP_ENABLED=false`.
 
-### 2. Исторические `DiskFull` в `job_runs`
+### 3. `genplan_fetch` / `genplan_pipeline` — MSI Holes 404
 
-Записи 14:14 MSK — до расширения диска с 13 GB до 489 GB. После расширения все повторные прогоны — success.
+Проблема **не связана с миграцией**. Push-канал M2M и `genplan_fetch_uploaded` — рабочий обходной путь.
 
-### 3. Firewall не настроен
+### 4. Firewall и шлюз
 
-Порты `5432` и `8000` открыты для всех интерфейсов. Рекомендуется ограничить доверенными IP.
+corp `172.21.0.0/16` → 80/8000/5432; шлюз `192.168.1.217` → 80/8000. PG в интернет не открыт. Публичный M2M через край → `.219:80` **ok** (2026-08-03).
 
-### 4. SWEB (старый сервер)
+### 5. DMZ `.222` отменена
 
-**SWEB** (`77.222.63.161`) — MONITOR **ещё запущен** (контейнеры `monitor-db`, `monitor-api`, `monitor-collector` — Up). Контейнеры `lens-report*` сняты. После cutover: `docker compose stop` в `/opt/monitor` на SWEB.
-
-### 5. MONITOR Внешний без стека
-
-**MONITOR Внешний** (`172.21.198.222`, `LEN-MONSTRRAB-01P`) — доступен по SSH, но не имеет выхода к SWEB. Для работы с MONITOR использовать **MONITOR Внутренний** (`172.21.198.219`).
+Документация [`mggt-DMZ/`](mggt-DMZ/) описывает устаревшую двухузловую схему. Актуальный прод — [`mggt_server/`](mggt_server/).
 
 ---
 
-## Сводка: что работает / что нет
+## Сводка: что работает (2026-08-03)
 
-| Категория | Работает | Не работает |
-|-----------|----------|-------------|
-| **API** | health, photo meta, uuid, mggtfield upload | — |
-| **Cron ETL** | data_mos, ogh_disruption, lens_pipeline, vector_stroy_url_222 | — |
-| **Sync** | lens_sync, stroymonitoring_sync | — |
-| **Genplan manual** | genplan, genplan_upload, genplan_fetch_uploaded, genplan_download | genplan_fetch, genplan_pipeline |
-| **Инфраструктура** | Docker, БД, диск, сеть к SPS/web_geo, связь MONITOR Внутренний↔SWEB | firewall (не настроен); API только из внутренней сети/VPN; MONITOR Внешний без доступа к SWEB |
+| Категория | Работает | Примечание |
+|-----------|----------|------------|
+| **API** | публичный домен + `.219` | смежники → `https://monitor-crm.mggt.ru` |
+| **Cron ETL** | collector Up | не гонять destructive CRM sync без нужды |
+| **CRM** | tasks **46439** | resync SWEB |
+| **Инфраструктура** | Docker, WebCRM, nginx, firewall | SWEB = тест |
 
 ---
 
 ## Команды для повторной проверки
 
 ```bash
-# API
+# WebCRM (VPN)
+curl -s http://172.21.198.219/health
+
+# M2M после подъёма Docker (VPN)
 curl -s http://172.21.198.219:8000/health
+
+# M2M для смежников (интернет)
+curl -s https://monitor-crm.mggt.ru/health
+
+# Тест SWEB
 curl -s http://77.222.63.161:8000/health
 
-# Контейнеры (MONITOR Внутренний)
+# Контейнеры (прод)
 ssh root@172.21.198.219 'cd /opt/monitor && docker compose ps'
 
-# Контейнеры (SWEB)
+# Контейнеры (тест)
 ssh -i id_rsa/id_rsa root@77.222.63.161 'cd /opt/monitor && docker compose ps'
 
-# Сетевая матрица с MONITOR Внутренний
-ssh root@172.21.198.219 'for h in 77.222.63.161 172.21.198.222 172.16.206.170 172.21.198.149; do
-  timeout 2 bash -c "echo >/dev/tcp/$h/22" 2>/dev/null && echo "$h:22 OK" || echo "$h:22 FAIL"
-done'
-
-# С SWEB во внутреннюю сеть (ожидается FAIL)
-ssh -i id_rsa/id_rsa root@77.222.63.161 'timeout 2 bash -c "echo >/dev/tcp/172.21.198.219/8000" && echo OK || echo FAIL'
-
-# С MONITOR Внешний
-ssh root@172.21.198.222 'curl -s http://172.21.198.219:8000/health'
-
-# Последние jobs
+# Последние jobs (после подъёма)
 ssh root@172.21.198.219 'cd /opt/monitor && docker compose exec -T db psql -U monitor -d monitor -c "
 SELECT job_name, status, left(message,60), started_at AT TIME ZONE '\''Europe/Moscow'\''
 FROM collector.job_runs ORDER BY started_at DESC LIMIT 15;"'
-
-# Ручной запуск job
-ssh root@172.21.198.219 'cd /opt/monitor && docker compose exec collector python -m collector.scheduler --run lens_sync'
 ```
 
 ---
 
 ## Cutover для потребителей
 
-| Параметр | Было (SWEB) | Стало (MONITOR Внутренний) |
-|----------|-------------|----------------------------|
-| API Base URL | `http://77.222.63.161:8000` | `http://172.21.198.219:8000` |
-| PostgreSQL host | `77.222.63.161` | `172.21.198.219` |
+| Параметр | Было (SWEB, бывший прод) | Стало (MONITOR) |
+|----------|--------------------------|-----------------|
+| API смежников (интернет) | `http://77.222.63.161:8000` | `https://monitor-crm.mggt.ru` |
+| API внутри VPN | — | `http://172.21.198.219:8000` |
+| WebCRM | `http://77.222.63.161/` | `http://172.21.198.219/` (VPN) |
+| PostgreSQL (Android, VPN) | `77.222.63.161` | `172.21.198.219` |
 | PostgreSQL port | `5432` | `5432` |
 | API key | — | без изменений |
+| SWEB | прод | **тест** (не удалять) |
+
+Пошаговый план / история: [`mggt_server/MIGRATION.md`](mggt_server/MIGRATION.md). Актуальный статус: [`mggt_server/CUTOVER_READY.md`](mggt_server/CUTOVER_READY.md).

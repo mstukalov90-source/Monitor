@@ -19,6 +19,8 @@ Usage
         resp = api.put_photo_meta("550e8400-e29b-41d4-a716-446655440000", payload)
         resp.raise_for_status()
         print(resp.json())
+
+Test stand (SWEB): base_url="http://77.222.63.161:8000"
 """
 from __future__ import annotations
 

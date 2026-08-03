@@ -219,14 +219,18 @@ docker compose exec collector python -m collector.scheduler --run lens_pipeline
 SELECT * FROM collector.job_runs ORDER BY started_at DESC LIMIT 20;
 ```
 
-## VPS Deploy
+## Prod server / deploy
+
+**Prod:** `172.21.198.219` (`/opt/monitor`). SSH: `ssh root@172.21.198.219`.  
+**Public M2M:** `https://monitor-crm.mggt.ru`. **Test (SWEB):** `http://77.222.63.161:8000`.  
+Polnaya instrukciya: [`DEPLOY.md`](DEPLOY.md), server: [`mggt_server/SERVER.md`](mggt_server/SERVER.md), paket dlya kolleg: [`mggt_server/API/`](mggt_server/API/).
 
 ```bash
-apt-get update && apt-get install -y ca-certificates curl gnupg git
-# ... Docker install (see previous README section) ...
+# na prode
 cd /opt/monitor
 cp .env.example .env
-# Zapolnit .env: MSI_HOLES_CLIENT_ID/SECRET (ili skopirovat genplan api/msi-holes-backend.client.json)
+# Zapolnit .env: MSI_HOLES_*, MONITOR_API_KEY,
+# MONITOR_API_PUBLIC_BASE_URL=https://monitor-crm.mggt.ru
 docker compose up -d --build
 docker compose exec -T db psql -U monitor -d monitor < sql/06_data_mos_extra_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
@@ -236,7 +240,7 @@ docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta
 docker compose exec -T db psql -U monitor -d monitor < sql/16_genplan_uploaded_photo.sql
 ```
 
-MSI Holes credentials **ne v git** (`.gitignore`: `genplan api/msi-holes-backend.client.json`). Na VPS — libo fayl v `genplan api/`, libo peremennye v `.env`.
+MSI Holes credentials **ne v git** (`.gitignore`: `genplan api/msi-holes-backend.client.json`). Na servere — libo fayl v `genplan api/`, libo peremennye v `.env`.
 
 ## Genplan (`jsons_genplan/`)
 
@@ -316,10 +320,10 @@ Peremennaya okruzheniya:
 GENPLAN_DOWNLOAD_HOOD_GIDS=1,2,3,4,5,6,7,8,9,10,11,12,13,14,20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124,128,129,130
 ```
 
-Skachivanie na lokalnuyu mashinu s VPS:
+Skachivanie na lokalnuyu mashinu s proda:
 
 ```bash
-rsync -avz -e "ssh -i <key>" root@<vps>:/opt/monitor/downloaded_photo/ ./downloaded_photo/
+rsync -avz -e "ssh" root@172.21.198.219:/opt/monitor/downloaded_photo/ ./downloaded_photo/
 ```
 
 Migratsiya tablitsy `genplan.uploaded_photo`:
@@ -347,27 +351,33 @@ LIMIT 10;
 
 Otdelnyy servis `api` prinimaet JSON metadannykh fotografiy ot kolleg (push). Dannye sohranyayutsya v `genplan.photo_meta` s upsert po `uuid`.
 
+**Prod Base URL (smezhniki):** `https://monitor-crm.mggt.ru`  
+**Vnutri VPN / corp:** `http://172.21.198.219:8000`  
+**Test (SWEB):** `http://77.222.63.161:8000` — ne dlya proda  
+Paket: `mggt_server/API/` (ONBOARDING, kontrakty, klient).
+
 ```bash
 docker compose up -d --build api
 curl -s http://localhost:8000/health
+curl -sS https://monitor-crm.mggt.ru/health
 ```
 
 Peremennye v `.env`:
 
 ```
-MONITOR_API_PUBLIC_BASE_URL=http://77.222.63.161:8000
+MONITOR_API_PUBLIC_BASE_URL=https://monitor-crm.mggt.ru
 MONITOR_API_KEY=<64_hex_chars>   # 256 bit: python3 -c "import secrets; print(secrets.token_hex(32))"
 MONITOR_API_KEYS=                # opcionalno: key1,key2
 MONITOR_API_PORT=8000
 ```
 
-Kollegam peredat Base URL `http://77.222.63.161:8000` i vydannyj API-klyuch. Otkryt port 8000 v firewall tolko dlya IP kolleg.
+Kollegam: Base URL `https://monitor-crm.mggt.ru` i API-klyuch. Android polevye foto (VPN): `http://172.21.198.219:8000`.
 
 Endpoint: `PUT /api/photos/meta/{uuid}`, zagolovok `Authorization: Bearer <MONITOR_API_KEY>`.
 
-Endpoint UUID (tolko identifikator): `PUT /api/uuids/{uuid}` → `genplan.uuid_api` (insert-only, dublikat → 409).
+Endpoint UUID: `PUT /api/uuids/{uuid}` → `genplan.uuid_api` (insert-only, dublikat → 409).
 
-Dokumentatsiya dlya kolleg: `genplan api/ONBOARDING.md`, `genplan api/monitor-api-doc.md`, `genplan api/monitor-uuid-api-doc.md`, primer klienta `genplan api/monitor_client.py`.
+Dokumentaciya: `mggt_server/API/`, takzhe `genplan api/ONBOARDING.md`.
 
 Migratsiya uuid dlya sushchestvuyushchey BD:
 
@@ -377,10 +387,10 @@ docker compose exec -T db psql -U monitor -d monitor < sql/16_genplan_uploaded_p
 docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_uuid_api.sql
 ```
 
-## SSH tunnel to DB
+## SSH tunnel to DB (prod)
 
 ```bash
-ssh -i <path_to_private_key> -L 5432:127.0.0.1:5432 root@77.222.63.161
+ssh -L 5432:127.0.0.1:5432 root@172.21.198.219
 ```
 
 ## Update / rollback
@@ -407,6 +417,7 @@ docker compose logs collector --tail 200
 
 # MONITOR M2M API (esli podnyat servis api)
 curl -s http://localhost:8000/health
+curl -sS https://monitor-crm.mggt.ru/health
 
 # Genplan upload (smoke test, opcionalno)
 mkdir -p photo_to_upload

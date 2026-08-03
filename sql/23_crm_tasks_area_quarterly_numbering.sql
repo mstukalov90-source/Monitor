@@ -27,6 +27,53 @@ ALTER TABLE crm.tasks_area
 CREATE INDEX IF NOT EXISTS idx_crm_tasks_area_task_number
     ON crm.tasks_area (task_number);
 
+-- Нормализация текстовых атрибутов (rayon/okrug): CR/LF, пробелы, дефисы.
+CREATE OR REPLACE FUNCTION crm.normalize_attr_text(p_value text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+STRICT
+AS $$
+    SELECT CASE
+        WHEN btrim(v) = '' THEN NULL
+        ELSE btrim(v)
+    END
+    FROM (
+        SELECT regexp_replace(
+                   regexp_replace(
+                       regexp_replace(p_value, E'[\r\n]+', ' ', 'g'),
+                       E'\\s+', ' ', 'g'
+                   ),
+                   E'\\s*-\\s*', '-', 'g'
+               ) AS v
+    ) s;
+$$;
+
+COMMENT ON FUNCTION crm.normalize_attr_text(text) IS
+'Чистит текстовые атрибуты tasks_area: CR/LF → пробел, схлопывание пробелов, пробелы вокруг дефиса.';
+
+-- Сегмент для task_number: после attr-нормализации пробелы/дефисы → '_'.
+CREATE OR REPLACE FUNCTION crm.normalize_task_label(p_value text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN a IS NULL OR a = '' THEN NULL
+        ELSE btrim(
+            regexp_replace(
+                regexp_replace(a, '[ -]+', '_', 'g'),
+                '_+', '_', 'g'
+            ),
+            '_'
+        )
+    END
+    FROM (SELECT crm.normalize_attr_text(p_value) AS a) s;
+$$;
+
+COMMENT ON FUNCTION crm.normalize_task_label(text) IS
+'Лейбл для task_number: normalize_attr_text + замена пробелов/дефисов на _, без краевых _.';
+
 CREATE OR REPLACE PROCEDURE crm.refresh_tasks_area_quarterly()
 LANGUAGE plpgsql
 AS $$
@@ -94,10 +141,10 @@ BEGIN
             n.area_sqm,
             format(
                 'М/%s-%s-%s/%s-%s',
-                n.okrug_shor,
+                crm.normalize_task_label(n.okrug_shor),
                 v_yy,
                 v_quarter,
-                regexp_replace(n.rayon, '[ -]+', '_', 'g'),
+                crm.normalize_task_label(n.rayon),
                 n.n
             ) AS task_number
         FROM numbered n
@@ -154,10 +201,10 @@ BEGIN
             n.area_sqm,
             format(
                 'М/%s-%s-%s/%s-%s',
-                n.okrug_shor,
+                crm.normalize_task_label(n.okrug_shor),
                 v_yy,
                 v_quarter,
-                regexp_replace(n.rayon, '[ -]+', '_', 'g'),
+                crm.normalize_task_label(n.rayon),
                 n.n
             ) AS task_number
         FROM numbered n
@@ -203,8 +250,9 @@ $$;
 COMMENT ON PROCEDURE crm.refresh_tasks_area_quarterly() IS
 'Квартальная нумерация crm.tasks_area: join с odh_export.hood
 (центроид внутри hood, >=99.9% площади внутри), иначе fallback из столбцов
-tasks_area (okrug_shor/okrug, rayon, gid). Формат М/{okrug_shor}-{YY}-{Q}/{rayon}-{N},
-площадь в кв. м до 0.0. N с севера на юг внутри hood.gid или tasks_area.gid.';
+tasks_area (okrug_shor/okrug, rayon, gid). Формат М/{okrug_shor}-{YY}-{Q}/{rayon}-{N}
+через crm.normalize_task_label (CR/LF, пробелы, дефисы). Площадь в кв. м до 0.0.
+N с севера на юг внутри hood.gid или tasks_area.gid.';
 
 -- ---------------------------------------------------------------------------
 -- Опционально: автозапуск в первый день каждого квартала через pg_cron.

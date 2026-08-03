@@ -1,4 +1,6 @@
 .env
+mggt_server/API/credentials.local.md
+**/credentials.local.md
 venv/
 __pycache__/
 *.pyc

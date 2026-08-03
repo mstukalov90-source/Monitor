@@ -1,17 +1,26 @@
-# Деплой MONITOR на VPS
+# Деплой MONITOR
 
-Инструкция по развёртыванию актуальной версии сборщика на сервере и переносу базы данных с локальной машины.
+**Основной прод-сервер:** `172.21.198.219` (`LEN-MOSTRRAB-DCR-01P`, RED OS)  
+**Путь:** `/opt/monitor`  
+**SSH:** `ssh root@172.21.198.219`  
+
+**Публичный M2M (смежники):** `https://monitor-crm.mggt.ru`  
+**Тест (SWEB, не прод):** `http://77.222.63.161:8000`  
+
+Конфиг сервера и переезд: [`mggt_server/SERVER.md`](mggt_server/SERVER.md), [`mggt_server/MIGRATION.md`](mggt_server/MIGRATION.md), пакет для коллег: [`mggt_server/API/`](mggt_server/API/).
+
+Инструкция ниже — развёртывание/обновление стека Docker и БД. На проде также работают nginx (WebCRM `:80`), `monitor-webcrm` (`:8080` localhost), firewalld.
 
 ## Требования
 
-- VPS с Ubuntu/Debian, доступ по SSH (`root` или sudo-пользователь)
+- Прод: RED OS / доступ `root@172.21.198.219` (или тестовый VPS с Docker)
 - Docker Engine и плагин Docker Compose (`docker compose`)
 - Git и доступ к репозиторию: `git@github.com:mstukalov90-source/Monitor.git`
-- На локальной машине: запущенный стек MONITOR с актуальными данными в БД
+- На локальной машине (при переносе БД): запущенный стек MONITOR с данными
 
 Рекомендуемый путь на сервере: `/opt/monitor`.
 
-## 1. Клонирование или обновление кода на VPS
+## 1. Клонирование или обновление кода
 
 Первичная установка:
 
@@ -42,11 +51,11 @@ nano .env   # или другой редактор
 - `REMOTE_DB_*` — доступ к SPS для `lens_sync`
 - `WEB_GEO_DB_PASSWORD` — для `stroymonitoring_sync`
 - `DATA_MOS_API_KEY` — при необходимости для data.mos.ru
-- `MONITOR_API_KEY` — 256-битный API-ключ для M2M-приёма photo meta (64 hex-символа)
-- `MONITOR_API_PUBLIC_BASE_URL` — публичный адрес API для коллег (без домена: `http://<IP_VPS>:8000`)
+- `MONITOR_API_KEY` — 256-битный API-ключ для M2M (64 hex)
+- `MONITOR_API_PUBLIC_BASE_URL` — публичный адрес для смежников: `https://monitor-crm.mggt.ru`
 - `MONITOR_API_PORT` — порт на хосте (по умолчанию `8000`)
-- `MGGT_FIELD_PHOTO_DIR` — каталог для полевых фото (по умолчанию `/app/mggtfield_photo` → `/opt/monitor/mggtfield_photo` на VPS)
-- `MGGT_FIELD_PHOTO_MAX_BYTES` — лимит размера загрузки (по умолчанию `20971520`, 20 MiB)
+- `MGGT_FIELD_PHOTO_DIR` — каталог полевых фото (`/opt/monitor/mggtfield_photo`)
+- `MGGT_FIELD_PHOTO_MAX_BYTES` — лимит размера (по умолчанию `20971520`)
 
 Сгенерировать ключ:
 
@@ -54,17 +63,15 @@ nano .env   # или другой редактор
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Пример в `.env`:
+Пример в `.env` (прод):
 
 ```env
-MONITOR_API_PUBLIC_BASE_URL=http://77.222.63.161:8000
+MONITOR_API_PUBLIC_BASE_URL=https://monitor-crm.mggt.ru
 MONITOR_API_KEY=<64_hex_chars>
 MONITOR_API_PORT=8000
 ```
 
-Ключ передаётся коллегам отдельно (см. `genplan api/ONBOARDING.md`). В git не коммитить.
-
-Файл `.env` не коммитить в git.
+Ключ передаётся коллегам отдельно (см. [`mggt_server/API/ONBOARDING.md`](mggt_server/API/ONBOARDING.md)). В git не коммитить. Файл `.env` не коммитить.
 
 ## 3. Запуск контейнеров
 
@@ -76,9 +83,9 @@ docker compose ps
 
 Ожидаемые сервисы:
 
-- `monitor-db` — PostGIS (порт `5432` на всех интерфейсах VPS)
-- `monitor-collector` — планировщик ETL (03:00 / 04:00 / 06:00 cron; genplan — ручной запуск)
-- `monitor-api` — M2M HTTP API приёма genplan photo meta (порт `8000`)
+- `monitor-db` — PostGIS (порт `5432`; на проде — корпсеть `172.21.0.0/16`, не интернет)
+- `monitor-collector` — планировщик ETL
+- `monitor-api` — M2M HTTP API (порт `8000`; снаружи для смежников — через домен `:443` → nginx `:80`)
 
 ## 4. Перенос базы данных с локальной машины
 
@@ -92,45 +99,31 @@ docker compose exec -T db pg_dump -U monitor -d monitor -Fc --no-owner --no-acl 
 docker cp monitor-db:/tmp/monitor_full.dump ./monitor_full.dump
 ```
 
-### 4.2 Скопировать на VPS
+### 4.2 Скопировать на прод
 
 ```bash
-scp -i <path_to_ssh_key> ./monitor_full.dump root@<server_ip>:/tmp/monitor_full.dump
+scp -i <path_to_ssh_key> ./monitor_full.dump root@172.21.198.219:/tmp/monitor_full.dump
 ```
 
-Пример для сервера `77.222.63.161`:
+### 4.3 Восстановить на прод
+
+На проде initdb-скрипты Docker создают stub-схемы — для чистого restore предпочтительно пустая БД + PostGIS, затем `pg_restore` из файла в контейнере (см. [`mggt_server/STAGE_FINAL_RESYNC_REPORT.md`](mggt_server/STAGE_FINAL_RESYNC_REPORT.md)).
 
 ```bash
-scp -i id_rsa/id_rsa ./monitor_full.dump root@77.222.63.161:/tmp/monitor_full.dump
-```
-
-### 4.3 Восстановить на VPS
-
-```bash
-ssh -i <path_to_ssh_key> root@<server_ip>
+ssh root@172.21.198.219
 cd /opt/monitor
 docker cp /tmp/monitor_full.dump monitor-db:/tmp/monitor_full.dump
-docker compose exec -T db pg_restore -U monitor -d monitor --clean --if-exists --no-owner --no-acl /tmp/monitor_full.dump
-docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
+docker compose exec -T db pg_restore -U monitor -d monitor --no-owner --no-acl /tmp/monitor_full.dump
 ```
 
-Пароль для подключения к БД после восстановления — из `.env` на VPS (`POSTGRES_PASSWORD`). Если при первом запуске контейнера пароль уже был задан, он должен совпадать с тем, что ожидает клиент.
+Пароль для подключения к БД — из `.env` на сервере (`POSTGRES_PASSWORD`).
 
-## 5. Firewall (опционально, рекомендуется)
+## 5. Firewall (прод)
 
-PostgreSQL слушает `0.0.0.0:5432`. Ограничьте доступ доверенными IP:
-
-```bash
-# пример: разрешить только свой IP
-ufw allow from <your_ip> to any port 5432 proto tcp
-ufw reload
-```
-
-Либо открыть для всех (менее безопасно):
+На `.219` используется **firewalld** (не ufw). Актуальные rich-rules: corp `172.21.0.0/16` → `80`/`8000`/`5432`; шлюз `192.168.1.217` → `80`/`8000`. PG в интернет не открывать. См. [`mggt_server/SERVER.md`](mggt_server/SERVER.md), [`mggt_server/firewall/server-firewalld.sh`](mggt_server/firewall/server-firewalld.sh).
 
 ```bash
-ufw allow 5432/tcp
-ufw reload
+firewall-cmd --list-rich-rules
 ```
 
 ## 6. Проверка после деплоя
@@ -139,6 +132,8 @@ ufw reload
 cd /opt/monitor
 docker compose ps
 docker compose logs collector --tail 100
+curl -sS http://127.0.0.1:8000/health
+curl -sS https://monitor-crm.mggt.ru/health   # с хоста с интернетом / SWEB
 ```
 
 Ручной запуск задач:
@@ -147,7 +142,6 @@ docker compose logs collector --tail 100
 docker compose exec collector python -m collector.scheduler --run data_mos
 docker compose exec collector python -m collector.scheduler --run lens_pipeline
 docker compose exec collector python -m collector.scheduler --run genplan
-docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 ```
 
 Проверка в БД:
@@ -156,7 +150,7 @@ docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor -c "
 SELECT schemaname, count(*) AS tables
 FROM pg_tables
-WHERE schemaname IN ('data_mos','lens','stroymonitoring','genplan','collector')
+WHERE schemaname IN ('data_mos','lens','stroymonitoring','genplan','collector','crm')
 GROUP BY schemaname
 ORDER BY 1;
 "
@@ -169,22 +163,26 @@ LIMIT 10;
 "
 ```
 
-## 7. Подключение к БД из интернета
+## 7. Подключение к БД
 
-Параметры (подставьте пароль из `.env` на VPS):
+PostgreSQL на проде **не** для интернета. Доступ из корпсети / VPN (Android) или SSH-туннель.
 
 | Параметр | Значение |
 |----------|----------|
-| Host | IP VPS (например `77.222.63.161`) |
+| Host | `172.21.198.219` |
 | Port | `5432` |
 | Database | `monitor` |
 | User | `monitor` |
 | Password | из `POSTGRES_PASSWORD` |
 
-Строка подключения:
-
 ```
-postgresql://monitor:<password>@77.222.63.161:5432/monitor
+postgresql://monitor:<password>@172.21.198.219:5432/monitor
+```
+
+Туннель с Mac:
+
+```bash
+ssh -L 5432:127.0.0.1:5432 root@172.21.198.219
 ```
 
 ## 8. Обновление версии на сервере
@@ -194,13 +192,9 @@ cd /opt/monitor
 git pull origin main
 docker compose up -d --build
 docker compose ps
-docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
-docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
-docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
-docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_uuid_api.sql
 ```
 
-При изменении схемы SQL может потребоваться повторный перенос дампа с локальной машины (раздел 4) или ручное применение миграций из каталога `sql/` (включая `sql/08_reports_geom.sql`, `sql/10_genplan_multi_tables.sql`, `sql/15_genplan_photo_meta_uuid.sql`, `sql/17_genplan_uuid_api.sql`).
+При изменении схемы — миграции из `sql/` или dump/restore. На проде не гонять деструктивные WebCRM SQL (`28_cleanup_*`) вслепую.
 
 ## 9. Genplan M2M API (приём photo meta и uuid)
 
@@ -209,58 +203,48 @@ docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_uuid_api.s
 - `PUT /api/photos/meta/{uuid}` — JSON meta → `genplan.photo_meta` (upsert)
 - `PUT /api/uuids/{uuid}` — только uuid → `genplan.uuid_api` (insert-only, дубликат → 409)
 
-Домен не используется — доступ по IP VPS, например `http://77.222.63.161:8000`. Протокол HTTP (без TLS).
+**Прод Base URL:** `https://monitor-crm.mggt.ru` (HTTPS).  
+Внутри корпсети / VPN также: `http://172.21.198.219:8000` или через nginx `:80`.
 
 Документация для коллег:
 
-- `genplan api/ONBOARDING.md` — быстрый старт
-- `genplan api/monitor-api-doc.md` — контракт photo meta
-- `genplan api/monitor-uuid-api-doc.md` — контракт uuid
-- `genplan api/monitor_client.py` — пример Python-клиента
+- [`mggt_server/API/ONBOARDING.md`](mggt_server/API/ONBOARDING.md) — быстрый старт (актуальный пакет)
+- [`mggt_server/API/monitor-api-doc.md`](mggt_server/API/monitor-api-doc.md)
+- [`mggt_server/API/monitor-uuid-api-doc.md`](mggt_server/API/monitor-uuid-api-doc.md)
+- [`mggt_server/API/monitor_client.py`](mggt_server/API/monitor_client.py)
 
 ### 9.1 Чеклист деплоя API
 
-- [ ] Код на VPS актуален (`git pull`)
+- [ ] Код на проде актуален (`git pull`)
 - [ ] В `.env` задан `MONITOR_API_KEY` (без него API отвечает `503`)
-- [ ] В `.env` задан `MONITOR_API_PUBLIC_BASE_URL=http://<IP_VPS>:8000`
-- [ ] Применена миграция `sql/15_genplan_photo_meta_uuid.sql` (обязательно на **существующей** БД; на новой — подхватывается initdb)
-- [ ] Применена миграция `sql/17_genplan_uuid_api.sql`
-- [ ] Запущен сервис `api`: `docker compose up -d --build api`
-- [ ] Порт `8000` открыт в firewall **только для IP коллег**
-- [ ] Проверены `health` и тестовый `PUT`
+- [ ] `MONITOR_API_PUBLIC_BASE_URL=https://monitor-crm.mggt.ru`
+- [ ] Запущен `api`: `docker compose up -d --build api`
+- [ ] Публичный `/health` ok: `curl -sS https://monitor-crm.mggt.ru/health`
+- [ ] Проверен тестовый `PUT` uuid/meta
 
 ### 9.2 Запуск и миграция
 
 ```bash
 cd /opt/monitor
-
-# миграция (если БД уже была до появления API)
 docker compose exec -T db psql -U monitor -d monitor < sql/15_genplan_photo_meta_uuid.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_uuid_api.sql
-
-# поднять API (или весь стек)
 docker compose up -d --build api
 docker compose ps
 ```
 
-### 9.3 Firewall для порта 8000
+### 9.3 Firewall
 
-```bash
-# разрешить только IP коллеги (пример)
-ufw allow from <colleague_ip> to any port 8000 proto tcp
-ufw reload
-```
-
-Порт `5432` по-прежнему не открывать для всего интернета.
+На проде — firewalld (см. §5). Снаружи смежники ходят на домен `:443`, не напрямую на `:8000` из интернета.
 
 ### 9.4 Проверка после деплоя
 
 ```bash
-curl -s http://77.222.63.161:8000/health
-# ожидается: {"status":"ok"}
+# с хоста с интернетом (например SWEB) или с Mac при рабочем ACL
+curl -sS https://monitor-crm.mggt.ru/health
+# {"status":"ok"}
 
-curl -s -w "\nHTTP %{http_code}\n" -X PUT \
-  "http://77.222.63.161:8000/api/photos/meta/550e8400-e29b-41d4-a716-446655440000" \
+curl -sS -w "\nHTTP %{http_code}\n" -X PUT \
+  "https://monitor-crm.mggt.ru/api/photos/meta/550e8400-e29b-41d4-a716-446655440000" \
   -H "Authorization: Bearer $MONITOR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -270,88 +254,79 @@ curl -s -w "\nHTTP %{http_code}\n" -X PUT \
     "lng": 37.74234417284182,
     "image_name": "test.jpg"
   }'
-# первая отправка: HTTP 201, повторная с тем же uuid: HTTP 200
 
-docker compose exec -T db psql -U monitor -d monitor -c "
-SELECT uuid, status, lat, lng, loaded_at
-FROM genplan.photo_meta
-WHERE uuid = '550e8400-e29b-41d4-a716-446655440000';
-"
-
-# uuid-only endpoint
-curl -s -w "\nHTTP %{http_code}\n" -X PUT \
-  "http://77.222.63.161:8000/api/uuids/8d4c7a74-6c6f-4e53-a93d-9a6a7d5f2f21" \
+# uuid-only
+curl -sS -w "\nHTTP %{http_code}\n" -X PUT \
+  "https://monitor-crm.mggt.ru/api/uuids/8d4c7a74-6c6f-4e53-a93d-9a6a7d5f2f21" \
   -H "Authorization: Bearer $MONITOR_API_KEY" \
   -H "Accept: application/json"
-# первая отправка: HTTP 201, повторная: HTTP 409
+```
 
-docker compose exec -T db psql -U monitor -d monitor -c "
-SELECT file_name, uuid, loaded_at
-FROM genplan.uuid_api
-WHERE uuid = '8d4c7a74-6c6f-4e53-a93d-9a6a7d5f2f21';
-"
+На проде в БД:
+
+```bash
+ssh root@172.21.198.219 'cd /opt/monitor && docker compose exec -T db psql -U monitor -d monitor -c "
+SELECT uuid, loaded_at FROM genplan.uuid_api ORDER BY loaded_at DESC LIMIT 5;
+"'
 ```
 
 ### 9.5 Что передать коллегам
 
 | Параметр | Значение |
 |----------|----------|
-| Base URL | `http://77.222.63.161:8000` |
+| Base URL | `https://monitor-crm.mggt.ru` |
 | Auth | `Authorization: Bearer <MONITOR_API_KEY>` |
 | UUID only | `PUT /api/uuids/{uuid}` — без тела |
-| Photo meta | `PUT /api/photos/meta/{uuid}` — JSON как в `genplan api/monitor-api-doc.md` |
+| Photo meta | `PUT /api/photos/meta/{uuid}` — JSON |
 
-Передаётся **только JSON meta**, не файл изображения.
+Передаётся **только JSON meta**, не файл изображения. Пакет: [`mggt_server/API/`](mggt_server/API/).
 
 ### 9.6 Ограничения
 
-- HTTPS не настроен (доступ по голому IP)
-- `GET` для чтения не реализован — endpoint'ы только **принимают** данные
-- `PUT /api/uuids/{uuid}` — insert-only; дубликат uuid → 409, без обновления
-- Nightly `genplan_fetch` может работать параллельно как резервный канал
+- Снаружи — HTTPS на домене; прямой `:8000` с интернета на `.219` недоступен
+- `GET` для чтения meta не реализован — endpoint'ы только **принимают** данные
+- `PUT /api/uuids/{uuid}` — insert-only; дубликат → 409
+- Тестовый стенд SWEB: `http://77.222.63.161:8000` — не для прода
 
 ## 10. Загрузка полевых фотографий (Android)
 
-Мобильное приложение отправляет JPEG/PNG через `POST /api/mggtfield/photos` (`multipart/form-data`, поле `file`). Файлы сохраняются на диск в `/opt/monitor/mggtfield_photo/` (в контейнере — `/app/mggtfield_photo/`).
+Мобильное приложение (VPN → корпсеть) отправляет JPEG/PNG через `POST /api/mggtfield/photos` на **`http://172.21.198.219:8000`**.
 
-Документация для Android-разработчика: [`mggtfield-photo-api-doc.md`](mggtfield-photo-api-doc.md)
+Документация: [`mggtfield-photo-api-doc.md`](mggtfield-photo-api-doc.md)
 
 ### 10.1 Чеклист деплоя
 
-- [ ] Код на VPS актуален (`git pull`)
-- [ ] Сервис `api` пересобран: `docker compose up -d --build api`
-- [ ] Каталог для фото существует и доступен для записи контейнером:
+- [ ] Код на проде актуален
+- [ ] `docker compose up -d --build api`
+- [ ] Каталог:
 
 ```bash
 mkdir -p /opt/monitor/mggtfield_photo
 chmod 755 /opt/monitor/mggtfield_photo
 ```
 
-- [ ] В `.env` задан `MONITOR_API_KEY` (тот же ключ, что для photo meta)
-- [ ] Порт `8000` открыт для IP разработчиков мобильного приложения
+- [ ] `MONITOR_API_KEY` задан
+- [ ] С планшета (VPN) доступны `:8000` и при необходимости PG `:5432`
 
-### 10.2 Проверка после деплоя
+### 10.2 Проверка
 
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST \
-  "http://77.222.63.161:8000/api/mggtfield/photos" \
+curl -sS -w "\nHTTP %{http_code}\n" -X POST \
+  "http://172.21.198.219:8000/api/mggtfield/photos" \
   -H "Authorization: Bearer $MONITOR_API_KEY" \
   -H "Accept: application/json" \
   -F "file=@/path/to/test.jpg;type=image/jpeg;filename=test_upload.jpg"
-# ожидается: HTTP 201, JSON с saved_as, size_bytes, content_type
-
-ls -la /opt/monitor/mggtfield_photo/
 ```
 
 ### 10.3 Что передать Android-разработчику
 
 | Параметр | Значение |
 |----------|----------|
-| Base URL | `http://77.222.63.161:8000` |
+| Base URL | `http://172.21.198.219:8000` (VPN / корпсеть) |
 | Метод | `POST /api/mggtfield/photos` |
 | Auth | `Authorization: Bearer <MONITOR_API_KEY>` |
 | Формат | `multipart/form-data`, поле `file` |
-| Документация | `mggtfield-photo-api-doc.md` (примеры OkHttp / Retrofit) |
+| Документация | `mggtfield-photo-api-doc.md` |
 
 ## Расписание задач
 
@@ -359,11 +334,11 @@ ls -la /opt/monitor/mggtfield_photo/
 |-------------|--------|----------|
 | 03:00 | `data_mos` | 8 экспортов data.mos.ru |
 | 04:00 | `lens_pipeline` | `lens_sync` + `stroymonitoring_sync` |
-| 06:00 | `vector_stroy_url_222` | fetch map221/rs_2022 (token: `Vector_py/token.md`) → DROP + upsert `vector_stroy.url_222` |
+| 06:00 | `vector_stroy_url_222` | fetch map221/rs_2022 → `vector_stroy.url_222` |
 
-Токен vector.mka.mos.ru периодически меняется — обновляйте `Vector_py/token.md` на сервере (файл в `.gitignore`). Альтернатива: env `VECTOR_MKA_TOKEN`. SSL: `VECTOR_MKA_VERIFY_SSL=false` по умолчанию. VPS не видит vector.mka.mos.ru — fetch локально, затем scp `url_222_wgs.geojson` на сервер.
+Токен vector.mka.mos.ru: `Vector_py/token.md` на сервере или `VECTOR_MKA_TOKEN`. Если сервер не видит vector.mka — fetch локально, затем scp `url_222_wgs.geojson` на `172.21.198.219`.
 
-`genplan_pipeline` (`genplan_fetch` + import) — **только ручной** запуск:
+`genplan_pipeline` — **только ручной** запуск:
 
 ```bash
 # В .env: GENPLAN_SEARCH_RADIUS_M=20000, GENPLAN_FETCH_META_LIMIT=0, MSI_HOLES_*
