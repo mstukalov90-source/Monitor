@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from collector.api.routes.mggtfield_photos import router as mggtfield_photos_router
 from collector.api.routes.photos import router as photos_router
+from collector.api.routes.qgis_photos import router as qgis_photos_router
 from collector.api.routes.uuids import router as uuids_router
 
 app = FastAPI(
@@ -13,13 +14,15 @@ app = FastAPI(
     version="1.0.0",
     description=(
         "Machine-to-machine API for ingesting genplan photo metadata, "
-        "photo UUIDs, and field photo uploads from mobile clients."
+        "photo UUIDs, field photo uploads from mobile clients, "
+        "and QGIS photo download."
     ),
 )
 
 app.include_router(photos_router)
 app.include_router(uuids_router)
 app.include_router(mggtfield_photos_router)
+app.include_router(qgis_photos_router)
 
 
 @app.get("/health")

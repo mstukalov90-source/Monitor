@@ -212,6 +212,7 @@ docker compose ps
 - [`mggt_server/API/monitor-api-doc.md`](mggt_server/API/monitor-api-doc.md)
 - [`mggt_server/API/monitor-uuid-api-doc.md`](mggt_server/API/monitor-uuid-api-doc.md)
 - [`mggt_server/API/monitor_client.py`](mggt_server/API/monitor_client.py)
+- [`QGIS_api/`](QGIS_api/) — скачивание фото для QGIS (`GET /api/qgis/photos/...`)
 
 ### 9.1 Чеклист деплоя API
 
@@ -278,8 +279,9 @@ SELECT uuid, loaded_at FROM genplan.uuid_api ORDER BY loaded_at DESC LIMIT 5;
 | Auth | `Authorization: Bearer <MONITOR_API_KEY>` |
 | UUID only | `PUT /api/uuids/{uuid}` — без тела |
 | Photo meta | `PUT /api/photos/meta/{uuid}` — JSON |
+| QGIS photo download | `GET /api/qgis/photos/genplan/{uuid}`, `GET /api/qgis/photos/field/{filename}` |
 
-Передаётся **только JSON meta**, не файл изображения. Пакет: [`mggt_server/API/`](mggt_server/API/).
+Передаётся **только JSON meta**, не файл изображения (ingest). Скачивание бинарников для QGIS — пакет [`QGIS_api/`](QGIS_api/). Пакет ingest: [`mggt_server/API/`](mggt_server/API/).
 
 ### 9.6 Ограничения
 

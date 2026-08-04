@@ -100,7 +100,7 @@ systemctl status nginx monitor-webcrm docker firewalld
 | Бэкап этапа 3 | `/etc/nginx/conf.d/monitor-webcrm.conf.bak.stage3` |
 | `server_name` | `172.21.198.219 monitor-crm.mggt.ru` |
 | root | `/var/www/monitor-webcrm` |
-| `= /health`, `/api/photos/meta/`, `/api/uuids/`, `/api/mggtfield/` | `proxy_pass http://127.0.0.1:8000` (M2M, без geo) |
+| `= /health`, `/api/photos/meta/`, `/api/uuids/`, `/api/mggtfield/`, `/api/qgis/` | `proxy_pass http://127.0.0.1:8000` (M2M, без geo) |
 | `/api/` (остальное), `/` (SPA) | WebCRM / SPA; **только** `$is_internal` (`127.0.0.0/8`, `172.21.0.0/16`), иначе `403` |
 
 Отчёты: [STAGE3_REPORT.md](STAGE3_REPORT.md), [STAGE4_REPORT.md](STAGE4_REPORT.md).
