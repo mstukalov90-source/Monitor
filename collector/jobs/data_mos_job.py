@@ -69,8 +69,7 @@ def _format_load_success_message(result: LoadResult) -> str:
         parts.append(
             f"crm_sync: inserted={result.crm_sync.inserted} "
             f"linked={result.crm_sync.linked} "
-            f"tasked_parents={result.crm_sync.tasked_parents} "
-            f"sent_to_field={result.crm_sync.sent_to_field}"
+            f"tasked_parents={result.crm_sync.tasked_parents}"
         )
     return ", ".join(parts)
 

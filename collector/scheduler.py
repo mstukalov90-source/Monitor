@@ -3,6 +3,7 @@ Scheduler for MONITOR data collector.
 
 Daily schedule (Europe/Moscow):
   00:01 — genplan_uuid_api_pipeline: uuid_api meta → crm.tasks → download
+  02:00 — ogh_analiz_sync: read-only gis.ogh_analiz (mggt_asu) → odh_export.ogh_analiz
   03:00 — data_mos (all 8 exports sequentially), then ogh_disruption if mggt_dgn.geojson exists
   03:30 — crm_task_sync_audit
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
@@ -18,6 +19,7 @@ Monthly (Europe/Moscow):
   genplan_download — download photos (disruption=true) to downloaded_photo/ (manual)
   backfill_ai_photo_tasks — one-time crm.tasks from genplan.photo_meta (manual)
   backfill_data_mos_crm_tasks — backfill crm.tasks for data_mos split tables (manual)
+  ogh_analiz_sync_orders — one-time ogh_analiz rows by "OrderName" list (manual)
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from collector.jobs import (
     genplan_job,
     genplan_upload_job,
     lens_sync_job,
+    ogh_analiz_sync_job,
     ogh_disruption_job,
     stroymonitoring_sync_job,
     vector_stroy_job,
@@ -85,6 +88,8 @@ def run_genplan_uuid_api_pipeline() -> None:
 def _build_jobs() -> dict[str, Callable[[], None]]:
     jobs: dict[str, Callable[[], None]] = {
         "data_mos": data_mos_job.run_all_data_mos,
+        "ogh_analiz_sync": ogh_analiz_sync_job.run,
+        "ogh_analiz_sync_orders": ogh_analiz_sync_job.run_orders_once,
         "ogh_disruption": ogh_disruption_job.run,
         "lens_pipeline": run_lens_pipeline,
         "lens_sync": lens_sync_job.run,
@@ -114,6 +119,7 @@ JOBS = _build_jobs()
 
 # Order for --run-all (no duplicate lens / stroymonitoring entries).
 RUN_ALL_ORDER: tuple[str, ...] = (
+    "ogh_analiz_sync",
     "data_mos",
     "ogh_disruption",
     "lens_pipeline",
@@ -151,6 +157,13 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
+        ogh_analiz_sync_job.run,
+        CronTrigger(hour=2, minute=0, timezone=TZ),
+        id="ogh_analiz_sync",
+        name="Read-only ogh_analiz sync (mggt_asu → odh_export)",
+        replace_existing=True,
+    )
+    scheduler.add_job(
         data_mos_job.run_all_data_mos,
         CronTrigger(hour=3, minute=0, timezone=TZ),
         id="data_mos",
@@ -185,6 +198,7 @@ def start_scheduler() -> None:
         "  01:00 first Saturday — data_mos monthly (%s)",
         ", ".join(c.job_name for c in DATA_MOS_MONTHLY_EXPORTS),
     )
+    logger.info("  02:00 — ogh_analiz_sync (mggt_asu gis.ogh_analiz, read-only)")
     logger.info("  03:00 — data_mos (%s services), then ogh_disruption", len(DATA_MOS_EXPORTS))
     for config in DATA_MOS_EXPORTS:
         logger.info("         — %s", config.job_name)
@@ -199,6 +213,7 @@ def start_scheduler() -> None:
     logger.info("  (genplan_download — manual only: --run genplan_download)")
     logger.info("  (backfill_ai_photo_tasks — manual only: --run backfill_ai_photo_tasks)")
     logger.info("  (backfill_data_mos_crm_tasks — manual only: --run backfill_data_mos_crm_tasks)")
+    logger.info("  (ogh_analiz_sync_orders — manual only: --run ogh_analiz_sync_orders)")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

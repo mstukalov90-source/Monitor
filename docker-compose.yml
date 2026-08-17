@@ -40,6 +40,7 @@ services:
       - ./sql/26_mggt_station_wgs84_attrs.sql:/docker-entrypoint-initdb.d/15-mggt-station-wgs84.sql:ro
       - ./sql/34_dict_comms.sql:/docker-entrypoint-initdb.d/16-dict-comms.sql:ro
       - ./sql/35_dict_illegal_reson.sql:/docker-entrypoint-initdb.d/17-dict-illegal-reson.sql:ro
+      - ./sql/36_odh_export_ogh_analiz.sql:/docker-entrypoint-initdb.d/18-odh-export-ogh-analiz.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s
@@ -72,6 +73,11 @@ services:
       WEB_GEO_DB_NAME: ${WEB_GEO_DB_NAME:-web_geo}
       WEB_GEO_DB_USER: ${WEB_GEO_DB_USER:-asidorov}
       WEB_GEO_DB_PASSWORD: ${WEB_GEO_DB_PASSWORD:-8XoMsO3Vyz}
+      MGGT_ASU_DB_HOST: ${MGGT_ASU_DB_HOST:-172.21.197.51}
+      MGGT_ASU_DB_PORT: ${MGGT_ASU_DB_PORT:-5432}
+      MGGT_ASU_DB_NAME: ${MGGT_ASU_DB_NAME:-mggt_asu}
+      MGGT_ASU_DB_USER: ${MGGT_ASU_DB_USER:-mstukalov}
+      MGGT_ASU_DB_PASSWORD: ${MGGT_ASU_DB_PASSWORD:-}
       DATA_MOS_API_KEY: ${DATA_MOS_API_KEY:-}
       MSI_HOLES_CLIENT_ID: ${MSI_HOLES_CLIENT_ID:-}
       MSI_HOLES_CLIENT_SECRET: ${MSI_HOLES_CLIENT_SECRET:-}

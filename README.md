@@ -6,7 +6,9 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 
 | Vremya | Zadacha | Opisanie |
 |-------|--------|----------|
+| 00:01 | `genplan_uuid_api_pipeline` | UUID iz `genplan.uuid_api` → meta MSI → `crm.tasks` (disruption) → skachivanie foto v `downloaded_photo/` |
 | 01:00 (1-ya sb mesyatsa) | `data_mos_60562` | Eksport `data_mos_export_60562.py` → TRUNCATE + load v `data_mos.items_60562` (bez purge i geom split) |
+| 02:00 | `ogh_analiz_sync` | Read-only `gis.ogh_analiz` iz `mggt_asu` → `odh_export.ogh_analiz` (MSK-77 SRID 980077 → WGS-84), insert/update po `id`, udalenie ischeznuvshikh |
 | 03:00 | `data_mos` | Vse 8 ezhednevnykh eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
 | 06:00 | `vector_stroy_url_222` | Chitaet token iz `Vector_py/token.md`, skachivaet GeoJSON map221/rs_2022 s vector.mka.mos.ru, DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; pri otsutstvii tokena ili oshibke API — propusk |
@@ -16,6 +18,8 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 `genplan_upload` — zagruzka fotografiy iz `photo_to_upload/` v MSI Holes API (`POST /api/upload`); otvet zapisyvaetsya v `genplan.uploaded_photo`. Posle uspekha fayl peremeshchaetsya v `photo_uploaded/`. Zapusk: `--run genplan_upload` ili tsepochka `--run genplan_upload_pipeline` (upload → `genplan_fetch_uploaded` → import).
 
 `genplan_fetch_uploaded` — po UUID iz `genplan.uploaded_photo` zabiraet meta iz MSI Holes (`GET /api/photos/meta/{uuid}`) i upsert v `genplan.photo_meta`. Ruchnoy zapusk: `--run genplan_fetch_uploaded`.
+
+`genplan_uuid_api_pipeline` — ezhednevno v **00:01** (i vruchnuyu): pending UUID iz `genplan.uuid_api` → MSI meta → `backfill_ai_photo_tasks` → `genplan_download`. Sm. razdel nizhe.
 
 Posle kazhdogo eksporta udalyayutsya sootvetstvuyushchie `.geojson` i `.gpkg`. Polnyy progon 8 ezhednevnykh servisov mozhet zanyat znachitelnoe vremya do starta `lens_sync` v 04:00.
 
@@ -156,6 +160,7 @@ docker compose exec -T db psql -U monitor -d monitor < sql/08_reports_geom.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/09_data_mos_geom_split.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/10_genplan_multi_tables.sql
 docker compose exec -T db psql -U monitor -d monitor < sql/14_lens_stroymonitoring_purge_functions.sql
+docker compose exec -T db psql -U monitor -d monitor < sql/36_odh_export_ogh_analiz.sql
 docker compose exec collector python -m collector.scheduler --run data_mos
 ```
 
@@ -180,8 +185,13 @@ docker compose exec collector python -m collector.scheduler --run stroymonitorin
 docker compose exec collector python -m collector.scheduler --run genplan_pipeline
 docker compose exec collector python -m collector.scheduler --run genplan_fetch
 docker compose exec collector python -m collector.scheduler --run genplan_fetch_uploaded
+docker compose exec collector python -m collector.scheduler --run genplan_fetch_uuid_api
+docker compose exec collector python -m collector.scheduler --run genplan_uuid_api_pipeline
+docker compose exec collector python -m collector.scheduler --run genplan_download
+docker compose exec collector python -m collector.scheduler --run backfill_ai_photo_tasks
 docker compose exec collector python -m collector.scheduler --run genplan
 docker compose exec collector python -m collector.scheduler --run ogh_disruption
+docker compose exec collector python -m collector.scheduler --run ogh_analiz_sync
 docker compose exec collector python -m collector.scheduler --run vector_stroy_url_222
 
 docker compose exec collector python -m collector.scheduler --run-all
@@ -197,7 +207,7 @@ User:     monitor
 Password: monitor
 ```
 
-Skhemy: `data_mos`, `lens`, `stroymonitoring`, `genplan`, `collector` (logi zapuskov).
+Skhemy: `data_mos`, `lens`, `stroymonitoring`, `genplan`, `odh_export`, `collector` (logi zapuskov).
 
 ### Stroymonitoring (web_geo)
 
@@ -211,6 +221,24 @@ docker compose up -d collector   # perечitat env posle izmeneniya .env
 docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
 # ili oba shaga kak v 04:00:
 docker compose exec collector python -m collector.scheduler --run lens_pipeline
+```
+
+### ogh_analiz (mggt_asu, read-only)
+
+Istochnik: `MGGT_ASU_DB_*` → `gis.ogh_analiz` (materialized view, MSK-77 SRID 980077). Priemnik: `odh_export.ogh_analiz` (MultiPolygon 4326). Collector chitaet istochnik **tolko SELECT** (`default_transaction_read_only=on`); `ST_Transform` i insert/update/delete — na lokalnoy BD. Unikalnyy klyuch: `id`.
+
+Migratsiya (sushchestvuyushchaya BD):
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/36_odh_export_ogh_analiz.sql
+```
+
+```bash
+# V korne proekta v faile .env (ne tolko .env.example):
+# MGGT_ASU_DB_PASSWORD=ваш_пароль
+docker compose up -d collector   # perechitat env posle izmeneniya .env
+
+docker compose exec collector python -m collector.scheduler --run ogh_analiz_sync
 ```
 
 ## Proverka logov zadach
@@ -244,7 +272,9 @@ MSI Holes credentials **ne v git** (`.gitignore`: `genplan api/msi-holes-backend
 
 ## Genplan (`jsons_genplan/`)
 
-V 05:00 cron **ne zapuskaetsya** — tolko vruchnuyu: `--run genplan_pipeline`. Shagi: `genplan_fetch` zabiraet dannye iz MSI Holes API (`POST /api/spatial_search`, `GET /api/photos/meta/{uuid}`), zatem `genplan` importiruet JSON v BD.
+`genplan_pipeline` (spatial_search + import) — **tolko ruchnoy** zapusk: `--run genplan_pipeline`. Shagi: `genplan_fetch` zabiraet dannye iz MSI Holes API (`POST /api/spatial_search`, `GET /api/photos/meta/{uuid}`), zatem `genplan` importiruet JSON v BD.
+
+Ezhednevnyy sbornik po UUID ot kolleg — otdelno: `genplan_uuid_api_pipeline` v **00:01** (sm. nizhe).
 
 Peremennye okruzheniya (v `.env`):
 
@@ -298,15 +328,56 @@ Tsepochka `genplan_upload_pipeline`: `genplan_upload` → `genplan_fetch_uploade
 
 Peremennaya `GENPLAN_FETCH_UPLOADED_LIMIT` (0 = bez limita) ogranicivaet chislo UUID za odin progon.
 
-### Skachivanie fotografiy po disruption i hood (`downloaded_photo/`)
+### Sbornik uuid_api → meta → tasks → download
 
-Ruchnoy job `genplan_download` vybiraet iz `genplan.photo_meta` snimki s `disruption = true`, popadayushchie vnutr poligona `odh_export.hood`, i skachivaet JPEG/PNG iz MSI Holes API v `downloaded_photo/`. Uzhe sushchestvuyushchie fayly propuskayutsya. Spisok `gid` nastraivaetsya cherez env (comma-separated).
+Ezhednevnyy cron **00:01** Europe/Moscow (takzhe ruchnoy zapusk). Istochnik UUID — tablitsa `genplan.uuid_api` (zapolnyaetsya smeshnikami cherez `PUT /api/uuids/{uuid}`).
 
-Predprosmotr v BD:
+Tsepochka `genplan_uuid_api_pipeline`:
+
+1. `genplan_fetch_uuid_api` — pending UUID (net v `photo_meta` ili `status <> 'done'`) → MSI `GET /api/photos/meta/{uuid}` → upsert v `genplan.photo_meta`. 404 = meta eshche ne gotova (skip).
+2. `backfill_ai_photo_tasks` — sozdaet zadachi v `crm.tasks` (tip «Разрытия») dlya strok `photo_meta` s `disruption IS TRUE` i `geom`, esli eshche net `crm.tasks.photo_uuid`.
+3. `genplan_download` — skachivaet JPEG/PNG vseh snimkov s `disruption = true` (i `geom`) iz MSI `GET /api/photos/images/{uuid}` v `downloaded_photo/` kak `{uuid}.ext`. Netu fayla na diske — povtor na kazhdom cron; uzhe lezhashchie (v tom chisle legacy po `image_name`) propuskayutsya.
 
 ```bash
-docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_disruption_in_hood.sql
+# Polnyy progon (kak v 00:01)
+docker compose exec collector python -m collector.scheduler --run genplan_uuid_api_pipeline
+
+# Po shagam
+docker compose exec collector python -m collector.scheduler --run genplan_fetch_uuid_api
+docker compose exec collector python -m collector.scheduler --run backfill_ai_photo_tasks
+docker compose exec collector python -m collector.scheduler --run genplan_download
 ```
+
+Peremennye:
+
+```
+GENPLAN_FETCH_UUID_API_LIMIT=0   # 0 = bez limita; napr. 20 dlya smoke-testa
+```
+
+Otlichie ot `genplan_fetch_uploaded`: istochnik UUID — `uuid_api` (push ot kolleg), a ne `uploaded_photo` (nash upload).
+
+Proverka:
+
+```sql
+SELECT count(*) FROM genplan.uuid_api;
+SELECT count(*) FROM genplan.photo_meta WHERE disruption IS TRUE;
+
+SELECT job_name, status, rows_affected, message, started_at
+FROM collector.job_runs
+WHERE job_name IN (
+  'genplan_fetch_uuid_api',
+  'backfill_ai_photo_tasks',
+  'genplan_download'
+)
+ORDER BY started_at DESC
+LIMIT 10;
+```
+
+### Skachivanie fotografiy (`downloaded_photo/`)
+
+Job `genplan_download` vybiraet iz `genplan.photo_meta` snimki s `disruption = true`, nepustym `uuid` i `geom`, i skachivaet JPEG/PNG iz MSI Holes API v `downloaded_photo/`. Filtra po `odh_export.hood` **net**.
+
+Kanonicheskoe imya fayla: `{uuid}.jpg` / `.png`. Esli fayla `{uuid}.*` net — **povtornaya popytka na kazhdom** cron/`--run genplan_download`. Unikalnye legacy-fayly po `image_name` promouytyatsya (hardlink/copy) v `{uuid}.*` bez povtornogo zaprosa k MSI; kollizii imyon ne promouytyatsya. Pustye fayly udalyayutsya. Zapis atomarnaya (temp → replace).
 
 Zapusk:
 
@@ -314,10 +385,10 @@ Zapusk:
 docker compose exec collector python -m collector.scheduler --run genplan_download
 ```
 
-Peremennaya okruzheniya:
+Predprosmotr disruption∩hood (spravochno, ne ispolzuetsya jobom):
 
-```
-GENPLAN_DOWNLOAD_HOOD_GIDS=1,2,3,4,5,6,7,8,9,10,11,12,13,14,20,62,69,70,71,72,73,74,75,76,77,78,79,80,81,82,122,124,128,129,130
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/17_genplan_disruption_in_hood.sql
 ```
 
 Skachivanie na lokalnuyu mashinu s proda:
@@ -376,6 +447,7 @@ Kollegam: Base URL `https://monitor-crm.mggt.ru` i API-klyuch. Android polevye f
 Endpoint: `PUT /api/photos/meta/{uuid}`, zagolovok `Authorization: Bearer <MONITOR_API_KEY>`.
 
 Endpoint UUID: `PUT /api/uuids/{uuid}` → `genplan.uuid_api` (insert-only, dublikat → 409).
+Dalee ezhednevnyy sbornik `genplan_uuid_api_pipeline` (00:01) tyanet meta/fayly po etim UUID (sm. vyshe).
 
 Dokumentaciya: `mggt_server/API/`, takzhe `genplan api/ONBOARDING.md`.
 
@@ -444,7 +516,11 @@ LIMIT 5;
 
 SELECT job_name, status, message, started_at
 FROM collector.job_runs
-WHERE job_name IN ('genplan_upload', 'genplan_fetch_uploaded', 'genplan_fetch', 'genplan')
+WHERE job_name IN (
+  'genplan_upload', 'genplan_fetch_uploaded', 'genplan_fetch_uuid_api',
+  'genplan_uuid_api_pipeline', 'genplan_download', 'backfill_ai_photo_tasks',
+  'genplan_fetch', 'genplan'
+)
 ORDER BY started_at DESC
 LIMIT 10;
 ```

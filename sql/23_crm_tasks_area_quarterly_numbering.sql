@@ -1,33 +1,26 @@
 -- Квартальная нумерация crm.tasks_area по родительским полигонам odh_export.hood.
--- Без совпадения с hood — fallback из столбцов tasks_area (okrug_shor/okrug, rayon, gid).
+-- Без совпадения с hood — атрибуты из tasks_area.
+-- Единый N на (okrug_shor, rayon) для всех статусов — без дублей hood vs fallback.
 -- Безопасно запускать повторно (CREATE OR REPLACE, ADD COLUMN IF NOT EXISTS).
 --
 -- Формат task_number:
 --   М/{okrug_shor}-{YY}-{Q}/{rayon_нормализованный}-{N}
 -- Пример: М/ЦАО-26-2/Тверской-1
 --
--- N — порядковый номер внутри одного hood.gid (или tasks_area.gid при fallback),
+-- N — порядковый номер внутри normalize(okrug_shor)+normalize(rayon),
 -- с севера на юг: ORDER BY ST_Y(ST_Centroid(geom)) DESC, key
---
--- Перед первым запуском проверьте схему hood:
---   SELECT column_name, udt_name
---   FROM information_schema.columns
---   WHERE table_schema = 'odh_export' AND table_name = 'hood'
---   ORDER BY ordinal_position;
 --
 -- Ручной запуск:
 --   CALL crm.refresh_tasks_area_quarterly();
 
 CREATE SCHEMA IF NOT EXISTS crm;
 
--- Колонка для квартального номера задачи.
 ALTER TABLE crm.tasks_area
     ADD COLUMN IF NOT EXISTS task_number TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_crm_tasks_area_task_number
     ON crm.tasks_area (task_number);
 
--- Нормализация текстовых атрибутов (rayon/okrug): CR/LF, пробелы, дефисы.
 CREATE OR REPLACE FUNCTION crm.normalize_attr_text(p_value text)
 RETURNS text
 LANGUAGE sql
@@ -52,7 +45,6 @@ $$;
 COMMENT ON FUNCTION crm.normalize_attr_text(text) IS
 'Чистит текстовые атрибуты tasks_area: CR/LF → пробел, схлопывание пробелов, пробелы вокруг дефиса.';
 
--- Сегмент для task_number: после attr-нормализации пробелы/дефисы → '_'.
 CREATE OR REPLACE FUNCTION crm.normalize_task_label(p_value text)
 RETURNS text
 LANGUAGE sql
@@ -78,145 +70,100 @@ CREATE OR REPLACE PROCEDURE crm.refresh_tasks_area_quarterly()
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_run_date         date;
-    v_yy               text;
-    v_quarter          integer;
-    v_updated          integer := 0;
-    v_fallback         integer := 0;
-    v_still_missing    integer := 0;
-    v_missing_keys     text;
+    v_run_date      date;
+    v_yy            text;
+    v_quarter       integer;
+    v_updated       integer := 0;
+    v_still_missing integer := 0;
+    v_missing_keys  text;
 BEGIN
-    -- Дата, год и квартал — по московскому времени.
     v_run_date := (timezone('Europe/Moscow', now()))::date;
     v_yy       := to_char(v_run_date, 'YY');
     v_quarter  := extract(quarter FROM v_run_date)::integer;
 
-    -- Шаг 1: пространственный join tasks_area → hood.
-    -- ST_Within слишком строгий: у соседних полигонов бывает микровыступ за границу hood
-    -- (доли м² при 100% визуальном попадании). Критерий: центроид внутри hood и
-    -- не менее 99.9% площади дочернего полигона лежит в hood.
-    -- Шаг 2: ROW_NUMBER() внутри каждого hood по Y центроида (север → юг).
-    -- Шаг 3: сборка task_number и площади в кв. м (округление до 0.0).
-    -- Шаг 4: массовое обновление task_number и area (geom не трогаем).
-    WITH matched AS (
+    -- Атрибуция: hood при match, иначе столбцы tasks_area.
+    -- Один ROW_NUMBER на (okrug_label, rayon_label) — без раздельных счётчиков.
+    -- Двухфазный UPDATE: сначала NULL (чтобы не бить unique index), потом финальные номера.
+    DROP TABLE IF EXISTS _crm_tasks_area_numbered;
+    CREATE TEMP TABLE _crm_tasks_area_numbered ON COMMIT DROP AS
+    WITH attributed AS (
         SELECT
             ta.key,
-            h.gid AS hood_gid,
-            coalesce(h.okrug_shor, h.okrug) AS okrug_shor,
-            h.rayon,
-            ta.geom,
+            coalesce(
+                nullif(btrim(h.okrug_shor), ''),
+                nullif(btrim(h.okrug), ''),
+                nullif(btrim(ta.okrug_shor), ''),
+                nullif(btrim(ta.okrug), '')
+            ) AS okrug_shor,
+            coalesce(
+                nullif(btrim(h.rayon), ''),
+                nullif(btrim(ta.rayon), '')
+            ) AS rayon,
             ST_Y(ST_Centroid(ta.geom)) AS centroid_y,
             round(ST_Area(ta.geom::geography)::numeric, 1)::double precision AS area_sqm
         FROM crm.tasks_area ta
-        JOIN LATERAL (
-            SELECT h_inner.*
+        LEFT JOIN LATERAL (
+            SELECT h_inner.okrug_shor, h_inner.okrug, h_inner.rayon
             FROM odh_export.hood h_inner
             WHERE h_inner.geom IS NOT NULL
               AND ST_Intersects(ta.geom, h_inner.geom)
               AND ST_Within(ST_Centroid(ta.geom), h_inner.geom)
               AND ST_Area(ST_Intersection(ta.geom, h_inner.geom)::geography)
                   >= 0.999 * ST_Area(ta.geom::geography)
-            -- При пересечении границ нескольких hood — берём максимальное пересечение.
             ORDER BY ST_Area(ST_Intersection(ta.geom, h_inner.geom)::geography) DESC
             LIMIT 1
         ) h ON true
         WHERE ta.geom IS NOT NULL
     ),
+    labeled AS (
+        SELECT
+            a.key,
+            a.area_sqm,
+            a.centroid_y,
+            crm.normalize_task_label(a.okrug_shor) AS okrug_label,
+            crm.normalize_task_label(a.rayon) AS rayon_label
+        FROM attributed a
+        WHERE crm.normalize_task_label(a.okrug_shor) IS NOT NULL
+          AND crm.normalize_task_label(a.rayon) IS NOT NULL
+    ),
     numbered AS (
         SELECT
-            m.key,
-            m.hood_gid,
-            m.okrug_shor,
-            m.rayon,
-            m.area_sqm,
+            l.key,
+            l.area_sqm,
+            l.okrug_label,
+            l.rayon_label,
             ROW_NUMBER() OVER (
-                PARTITION BY m.hood_gid
-                ORDER BY m.centroid_y DESC, m.key
+                PARTITION BY l.okrug_label, l.rayon_label
+                ORDER BY l.centroid_y DESC, l.key
             ) AS n
-        FROM matched m
-    ),
-    formatted AS (
-        SELECT
-            n.key,
-            n.area_sqm,
-            format(
-                'М/%s-%s-%s/%s-%s',
-                crm.normalize_task_label(n.okrug_shor),
-                v_yy,
-                v_quarter,
-                crm.normalize_task_label(n.rayon),
-                n.n
-            ) AS task_number
-        FROM numbered n
+        FROM labeled l
     )
+    SELECT
+        n.key,
+        n.area_sqm,
+        format(
+            'М/%s-%s-%s/%s-%s',
+            n.okrug_label,
+            v_yy,
+            v_quarter,
+            n.rayon_label,
+            n.n
+        ) AS task_number
+    FROM numbered n;
+
     UPDATE crm.tasks_area ta
     SET
-        task_number = f.task_number,
-        area        = f.area_sqm
-    FROM formatted f
-    WHERE ta.key = f.key;
+        task_number = NULL,
+        area        = n.area_sqm
+    FROM _crm_tasks_area_numbered n
+    WHERE ta.key = n.key;
+
+    UPDATE crm.tasks_area ta
+    SET task_number = n.task_number
+    FROM _crm_tasks_area_numbered n
+    WHERE ta.key = n.key;
 
     GET DIAGNOSTICS v_updated = ROW_COUNT;
-
-    -- Fallback: без hood — собрать номер из столбцов самой tasks_area.
-    -- Формат тот же: М/{okrug_shor}-{YY}-{Q}/{rayon}-{N}.
-    -- N внутри partition по gid (как у hood), с севера на юг.
-    WITH unmatched AS (
-        SELECT
-            ta.key,
-            coalesce(nullif(btrim(ta.okrug_shor), ''), nullif(btrim(ta.okrug), '')) AS okrug_shor,
-            nullif(btrim(ta.rayon), '') AS rayon,
-            coalesce(ta.gid, -1) AS part_gid,
-            ST_Y(ST_Centroid(ta.geom)) AS centroid_y,
-            round(ST_Area(ta.geom::geography)::numeric, 1)::double precision AS area_sqm
-        FROM crm.tasks_area ta
-        WHERE ta.geom IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1
-              FROM odh_export.hood h
-              WHERE h.geom IS NOT NULL
-                AND ST_Intersects(ta.geom, h.geom)
-                AND ST_Within(ST_Centroid(ta.geom), h.geom)
-                AND ST_Area(ST_Intersection(ta.geom, h.geom)::geography)
-                    >= 0.999 * ST_Area(ta.geom::geography)
-          )
-          AND coalesce(nullif(btrim(ta.okrug_shor), ''), nullif(btrim(ta.okrug), '')) IS NOT NULL
-          AND nullif(btrim(ta.rayon), '') IS NOT NULL
-    ),
-    numbered AS (
-        SELECT
-            u.key,
-            u.okrug_shor,
-            u.rayon,
-            u.area_sqm,
-            ROW_NUMBER() OVER (
-                PARTITION BY u.part_gid
-                ORDER BY u.centroid_y DESC, u.key
-            ) AS n
-        FROM unmatched u
-    ),
-    formatted AS (
-        SELECT
-            n.key,
-            n.area_sqm,
-            format(
-                'М/%s-%s-%s/%s-%s',
-                crm.normalize_task_label(n.okrug_shor),
-                v_yy,
-                v_quarter,
-                crm.normalize_task_label(n.rayon),
-                n.n
-            ) AS task_number
-        FROM numbered n
-    )
-    UPDATE crm.tasks_area ta
-    SET
-        task_number = f.task_number,
-        area        = f.area_sqm
-    FROM formatted f
-    WHERE ta.key = f.key;
-
-    GET DIAGNOSTICS v_fallback = ROW_COUNT;
 
     SELECT count(*)
     INTO v_still_missing
@@ -225,8 +172,8 @@ BEGIN
       AND (ta.task_number IS NULL OR btrim(ta.task_number) = '');
 
     RAISE NOTICE
-        'refresh_tasks_area_quarterly: дата=%, квартал=%, год=20%, по hood=% , fallback=%',
-        v_run_date, v_quarter, v_yy, v_updated, v_fallback;
+        'refresh_tasks_area_quarterly: дата=%, квартал=%, год=20%, обновлено=%',
+        v_run_date, v_quarter, v_yy, v_updated;
 
     IF v_still_missing > 0 THEN
         SELECT string_agg(sub.key::text, ', ' ORDER BY sub.key)
@@ -241,30 +188,18 @@ BEGIN
         ) sub;
 
         RAISE WARNING
-            'refresh_tasks_area_quarterly: % полигон(ов) без task_number (нет hood и нет okrug_shor/rayon). key (первые 20): %',
+            'refresh_tasks_area_quarterly: % полигон(ов) без task_number (нет okrug_shor/rayon). key (первые 20): %',
             v_still_missing, v_missing_keys;
     END IF;
 END;
 $$;
 
 COMMENT ON PROCEDURE crm.refresh_tasks_area_quarterly() IS
-'Квартальная нумерация crm.tasks_area: join с odh_export.hood
-(центроид внутри hood, >=99.9% площади внутри), иначе fallback из столбцов
-tasks_area (okrug_shor/okrug, rayon, gid). Формат М/{okrug_shor}-{YY}-{Q}/{rayon}-{N}
-через crm.normalize_task_label (CR/LF, пробелы, дефисы). Площадь в кв. м до 0.0.
-N с севера на юг внутри hood.gid или tasks_area.gid.';
+'Квартальная нумерация crm.tasks_area: атрибуты из odh_export.hood при match,
+иначе из tasks_area. Единый N на (okrug_shor, rayon) для всех статусов
+(М/{okrug}-{YY}-{Q}/{rayon}-{N} через normalize_task_label). Площадь в кв. м до 0.0.
+N с севера на юг по ST_Y(ST_Centroid(geom)).';
 
--- ---------------------------------------------------------------------------
--- Опционально: автозапуск в первый день каждого квартала через pg_cron.
--- Требует расширение pg_cron и настройку cron.timezone = ''Europe/Moscow''.
---
--- CREATE EXTENSION IF NOT EXISTS pg_cron;
---
--- SELECT cron.schedule(
---     'crm-tasks-area-quarterly',
---     '0 0 1 1,4,7,10 *',
---     $$CALL crm.refresh_tasks_area_quarterly()$$
--- );
---
--- Удаление задания:
---   SELECT cron.unschedule('crm-tasks-area-quarterly');
+-- Unique index создаётся отдельно после устранения дублей:
+--   CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_tasks_area_task_number
+--       ON crm.tasks_area (task_number) WHERE task_number IS NOT NULL;

@@ -135,10 +135,24 @@ WEB_GEO_DB = {
     "password": os.getenv("WEB_GEO_DB_PASSWORD", ""),
 }
 
+MGGT_ASU_DB = {
+    "host": os.getenv("MGGT_ASU_DB_HOST", "172.21.197.51"),
+    "port": int(os.getenv("MGGT_ASU_DB_PORT", "5432")),
+    "dbname": os.getenv("MGGT_ASU_DB_NAME", "mggt_asu"),
+    "user": os.getenv("MGGT_ASU_DB_USER", "mstukalov"),
+    "password": os.getenv("MGGT_ASU_DB_PASSWORD", ""),
+}
+
 STROYMONITORING_REMOTE_SCHEMA = "public"
 STROYMONITORING_REMOTE_TABLE = "boundaries_aip"
 STROYMONITORING_LOCAL_SCHEMA = "stroymonitoring"
 STROYMONITORING_LOCAL_TABLE = "boundaries_aip"
+
+OGH_ANALIZ_REMOTE_SCHEMA = "gis"
+OGH_ANALIZ_REMOTE_TABLE = "ogh_analiz"
+OGH_ANALIZ_LOCAL_SCHEMA = "odh_export"
+OGH_ANALIZ_LOCAL_TABLE = "ogh_analiz"
+OGH_ANALIZ_SOURCE_SRID = 980077
 
 TZ = os.getenv("TZ", "Europe/Moscow")
 
@@ -219,3 +233,4 @@ LENS_STROYMONITORING_PURGE_FUNCTIONS_SQL = (
 )
 DATA_MOS_LINE_TO_POLYGON_SQL = PROJECT_DIR / "sql" / "07_line_to_polygon.sql"
 DATA_MOS_GEOM_SPLIT_SQL = PROJECT_DIR / "sql" / "09_data_mos_geom_split.sql"
+OGH_ANALIZ_SQL = PROJECT_DIR / "sql" / "36_odh_export_ogh_analiz.sql"

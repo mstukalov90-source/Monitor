@@ -1,9 +1,16 @@
-"""Download genplan photos (disruption=true) from MSI Holes API."""
+"""Download genplan photos (disruption=true) from MSI Holes API.
+
+Missing ``{uuid}.ext`` files are retried on every run. Unique legacy files named
+by ``image_name`` are promoted (hardlink/copy) to the canonical name without a
+re-fetch. Colliding ``image_name`` values are not promoted (false skip risk).
+"""
 
 from __future__ import annotations
 
 import logging
 import re
+import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +45,7 @@ WHERE pm.disruption IS TRUE
 ORDER BY pm.loaded_at DESC
 """
 
+_UUID_SUFFIXES = (".jpg", ".jpeg", ".png")
 _UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -56,12 +64,75 @@ def _load_photo_rows() -> list[dict[str, Any]]:
             return list(cur.fetchall())
 
 
-def _safe_filename(image_name: str | None, uuid: str) -> str:
-    if image_name and str(image_name).strip():
-        name = _UNSAFE_FILENAME.sub("_", Path(str(image_name).strip()).name)
-        if name and name not in (".", ".."):
-            return name
-    return f"{uuid}.jpg"
+def _is_nonempty_file(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _unlink_quiet(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.debug("Could not remove %s", path, exc_info=True)
+
+
+def _remove_empty(path: Path) -> None:
+    try:
+        if path.is_file() and path.stat().st_size == 0:
+            path.unlink(missing_ok=True)
+    except OSError:
+        logger.debug("Could not remove empty %s", path, exc_info=True)
+
+
+def _legacy_filename(image_name: str | None) -> str | None:
+    if not image_name or not str(image_name).strip():
+        return None
+    name = _UNSAFE_FILENAME.sub("_", Path(str(image_name).strip()).name)
+    if name and name not in (".", ".."):
+        return name
+    return None
+
+
+def _find_canonical(download_dir: Path, uuid: str) -> Path | None:
+    for suffix in _UUID_SUFFIXES:
+        candidate = download_dir / f"{uuid}{suffix}"
+        _remove_empty(candidate)
+        if _is_nonempty_file(candidate):
+            return candidate
+    return None
+
+
+def _promote_legacy(download_dir: Path, uuid: str, image_name: str | None) -> Path | None:
+    """Copy/hardlink a unique legacy image_name file to ``{uuid}.ext``."""
+    legacy_name = _legacy_filename(image_name)
+    if not legacy_name:
+        return None
+    legacy = download_dir / legacy_name
+    _remove_empty(legacy)
+    if not _is_nonempty_file(legacy):
+        return None
+
+    suffix = legacy.suffix.lower() if legacy.suffix.lower() in _UUID_SUFFIXES else ".jpg"
+    dest = download_dir / f"{uuid}{suffix}"
+    if _is_nonempty_file(dest):
+        return dest
+
+    try:
+        try:
+            dest.hardlink_to(legacy)
+        except OSError:
+            shutil.copy2(legacy, dest)
+    except OSError as exc:
+        logger.warning("Failed to promote legacy %s -> %s: %s", legacy.name, dest.name, exc)
+        _unlink_quiet(dest)
+        return None
+
+    if not _is_nonempty_file(dest):
+        _unlink_quiet(dest)
+        return None
+    return dest
 
 
 def _extension_from_content_type(content_type: str | None) -> str:
@@ -75,22 +146,29 @@ def _extension_from_content_type(content_type: str | None) -> str:
     return ".jpg"
 
 
-def _ensure_extension(path: Path, content_type: str | None) -> Path:
-    ext = _extension_from_content_type(content_type)
-    if path.suffix.lower() not in (".jpg", ".jpeg", ".png"):
-        return path.with_suffix(ext)
-    return path
-
-
-def _download_photo(api: MsiHolesClient, uuid: str, dest: Path) -> None:
+def _download_photo(api: MsiHolesClient, uuid: str, download_dir: Path) -> Path:
+    """Download image for uuid into ``{uuid}.ext`` via atomic temp + replace."""
     resp = api.get(
         API_PHOTOS_IMAGE.format(uuid=uuid),
         headers={"Accept": "image/jpeg, image/png"},
     )
     resp.raise_for_status()
-    dest = _ensure_extension(dest, resp.headers.get("content-type"))
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(resp.content)
+
+    ext = _extension_from_content_type(resp.headers.get("content-type"))
+    dest = download_dir / f"{uuid}{ext}"
+    part = download_dir / f".{uuid}.part"
+
+    download_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        part.write_bytes(resp.content)
+        if part.stat().st_size == 0:
+            raise ValueError(f"empty response body for {uuid}")
+        part.replace(dest)
+    except Exception:
+        _unlink_quiet(part)
+        raise
+
+    return dest
 
 
 def run() -> None:
@@ -103,7 +181,7 @@ def run() -> None:
             conn,
             JOB_NAME,
             "running",
-            f"disruption=true -> {download_dir.name}/",
+            f"disruption=true -> {download_dir.name}/ (retry missing)",
         )
 
     rows = _load_photo_rows()
@@ -121,32 +199,55 @@ def run() -> None:
         logger.info("genplan_download finished: %s", message)
         return
 
-    downloaded = 0
+    legacy_counts: Counter[str] = Counter()
+    for row in rows:
+        legacy = _legacy_filename(row.get("image_name"))
+        if legacy:
+            legacy_counts[legacy] += 1
+
     skipped = 0
+    promoted = 0
+    to_fetch: list[dict[str, Any]] = []
+
+    for row in rows:
+        uuid = str(row["uuid"]).strip()
+        if _find_canonical(download_dir, uuid) is not None:
+            skipped += 1
+            continue
+
+        legacy = _legacy_filename(row.get("image_name"))
+        if legacy and legacy_counts[legacy] == 1:
+            if _promote_legacy(download_dir, uuid, row.get("image_name")) is not None:
+                promoted += 1
+                logger.info("Promoted legacy %s -> %s.jpg|.png", legacy, uuid)
+                continue
+
+        to_fetch.append(row)
+
+    downloaded = 0
     errors: list[str] = []
 
     try:
-        with MsiHolesClient(
-            client_id=MSI_HOLES_CLIENT_ID,
-            client_secret=MSI_HOLES_CLIENT_SECRET,
-            base_url=MSI_HOLES_BASE_URL,
-            token_endpoint=MSI_HOLES_TOKEN_ENDPOINT,
-            timeout=120.0,
-        ) as api:
-            for row in rows:
-                uuid = str(row["uuid"]).strip()
-                dest = download_dir / _safe_filename(row.get("image_name"), uuid)
-                if dest.exists():
-                    skipped += 1
-                    logger.debug("Skip existing %s", dest.name)
-                    continue
-                try:
-                    _download_photo(api, uuid, dest)
-                    downloaded += 1
-                    logger.info("Downloaded %s -> %s", uuid, dest.name)
-                except (httpx.HTTPError, OSError, ValueError) as exc:
-                    logger.warning("Failed to download %s: %s", uuid, exc)
-                    errors.append(f"{uuid}: {exc}")
+        if to_fetch:
+            with MsiHolesClient(
+                client_id=MSI_HOLES_CLIENT_ID,
+                client_secret=MSI_HOLES_CLIENT_SECRET,
+                base_url=MSI_HOLES_BASE_URL,
+                token_endpoint=MSI_HOLES_TOKEN_ENDPOINT,
+                timeout=120.0,
+            ) as api:
+                for row in to_fetch:
+                    uuid = str(row["uuid"]).strip()
+                    try:
+                        dest = _download_photo(api, uuid, download_dir)
+                        downloaded += 1
+                        logger.info("Downloaded %s -> %s", uuid, dest.name)
+                    except (httpx.HTTPError, OSError, ValueError) as exc:
+                        logger.warning("Failed to download %s: %s", uuid, exc)
+                        errors.append(f"{uuid}: {exc}")
+                        _unlink_quiet(download_dir / f".{uuid}.part")
+                        for suffix in _UUID_SUFFIXES:
+                            _remove_empty(download_dir / f"{uuid}{suffix}")
     except Exception as exc:
         logger.exception("genplan_download job failed")
         with local_connection() as conn:
@@ -155,15 +256,18 @@ def run() -> None:
                 JOB_NAME,
                 "failed",
                 str(exc),
-                rows_affected=downloaded,
+                rows_affected=downloaded + promoted,
                 run_id=run_id,
             )
         raise
 
     message_parts = [
         f"{len(rows)} matched",
+        f"{len(to_fetch)} missing",
         f"{downloaded} downloaded",
     ]
+    if promoted:
+        message_parts.append(f"{promoted} promoted from legacy")
     if skipped:
         message_parts.append(f"{skipped} skipped (already on disk)")
     if errors:
@@ -171,7 +275,9 @@ def run() -> None:
         if len(errors) > 5:
             message_parts.append("...")
 
-    job_status = "failed" if errors and downloaded == 0 else "success"
+    job_status = (
+        "failed" if errors and downloaded == 0 and promoted == 0 and to_fetch else "success"
+    )
     message = "; ".join(message_parts)
 
     with local_connection() as conn:
@@ -180,7 +286,7 @@ def run() -> None:
             JOB_NAME,
             job_status,
             message,
-            rows_affected=downloaded,
+            rows_affected=downloaded + promoted,
             run_id=run_id,
         )
 
