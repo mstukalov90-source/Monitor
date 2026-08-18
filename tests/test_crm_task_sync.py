@@ -48,7 +48,8 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
         cur = MagicMock()
         cur.rowcount = 1
         result = sync_crm_tasks_after_etl(cur, "items_2855")
-        self.assertGreaterEqual(cur.execute.call_count, 7)
+        self.assertGreaterEqual(cur.execute.call_count, 8)
+        self.assertEqual(cur.execute.call_args_list[-1][0][0], "CALL crm.refresh_task_area_keys()")
         self.assertGreaterEqual(result.inserted, 0)
         field_sqls = [
             call.args[0]
@@ -67,9 +68,14 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
         cur = MagicMock()
         cur.rowcount = 1
         sync_crm_tasks_after_etl(cur, "items_2855")
-        tasked_sql = cur.execute.call_args_list[-1][0][0]
-        self.assertIn("SET tasked = (", tasked_sql)
-        self.assertNotIn("IS NOT TRUE", tasked_sql)
+        tasked_sqls = [
+            call.args[0]
+            for call in cur.execute.call_args_list
+            if isinstance(call.args[0], str) and "SET tasked = (" in call.args[0]
+        ]
+        self.assertEqual(len(tasked_sqls), 1)
+        self.assertNotIn("IS NOT TRUE", tasked_sqls[0])
+        self.assertEqual(cur.execute.call_args_list[-1][0][0], "CALL crm.refresh_task_area_keys()")
 
 
 if __name__ == "__main__":

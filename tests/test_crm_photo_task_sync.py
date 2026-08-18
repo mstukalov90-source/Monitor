@@ -58,14 +58,16 @@ class CrmPhotoTaskSyncSqlTests(unittest.TestCase):
         cur = MagicMock()
         cur.rowcount = 1
         result = sync_ai_photo_tasks(cur)
-        self.assertEqual(cur.execute.call_count, 2)
+        self.assertEqual(cur.execute.call_count, 3)
+        self.assertEqual(cur.execute.call_args_list[-1][0][0], "CALL crm.refresh_task_area_keys()")
         self.assertGreaterEqual(result.inserted, 0)
 
     def test_sync_lens_photo_runs_insert_and_anchor(self) -> None:
         cur = MagicMock()
         cur.rowcount = 1
         result = sync_lens_photo_tasks(cur)
-        self.assertEqual(cur.execute.call_count, 2)
+        self.assertEqual(cur.execute.call_count, 3)
+        self.assertEqual(cur.execute.call_args_list[-1][0][0], "CALL crm.refresh_task_area_keys()")
         self.assertGreaterEqual(result.inserted, 0)
 
 

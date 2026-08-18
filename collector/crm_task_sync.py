@@ -131,6 +131,7 @@ def sync_crm_tasks_after_etl(cur: Any, parent_table_name: str) -> CrmTaskSyncRes
         result.linked += _link_split_rows(cur, cfg, layer)
 
     result.tasked_parents = refresh_all_tasked_parents(cur, cfg.parent_table)
+    refresh_task_area_keys(cur)
 
     logger.info(
         "crm_task_sync %s: inserted=%s linked=%s tasked_parents=%s",
@@ -140,3 +141,8 @@ def sync_crm_tasks_after_etl(cur: Any, parent_table_name: str) -> CrmTaskSyncRes
         result.tasked_parents,
     )
     return result
+
+
+def refresh_task_area_keys(cur: Any) -> None:
+    """Recompute crm.tasks.area_key from geometry ∩ crm.tasks_area."""
+    cur.execute("CALL crm.refresh_task_area_keys()")

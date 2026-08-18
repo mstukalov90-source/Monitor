@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from collector.crm_task_sync import CrmTaskSyncResult
+from collector.crm_task_sync import CrmTaskSyncResult, refresh_task_area_keys
 from collector.crm_task_sync_config import ETL_SYNC_LOGIN, TASK_ID_COLUMNS
 
 logger = logging.getLogger(__name__)
@@ -116,6 +116,7 @@ def sync_photo_layer_tasks(cur: Any, cfg: PhotoLayerSync) -> CrmTaskSyncResult:
     result.inserted = _insert_photo_tasks(cur, cfg)
     anchored = _anchor_photo_tasks(cur, cfg)
     result.linked = anchored
+    refresh_task_area_keys(cur)
 
     logger.info(
         "crm_photo_task_sync %s: inserted=%s anchored=%s",
