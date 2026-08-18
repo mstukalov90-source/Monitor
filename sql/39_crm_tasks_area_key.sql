@@ -214,7 +214,7 @@ AS $$
             FROM crm.tasks_area a
             WHERE a.geom IS NOT NULL
               AND NOT ST_IsEmpty(a.geom)
-              AND ST_Intersects(ST_MakeValid(p_geom), ST_MakeValid(a.geom))
+              AND ST_Intersects(ST_MakeValid(p_geom), a.geom)
         )
     END;
 $$;
@@ -246,8 +246,14 @@ BEGIN
     UPDATE crm.tasks t
     SET area_key = s.keys
     FROM (
-        SELECT g.task_key, crm.task_area_keys(g.geom) AS keys
+        SELECT g.task_key,
+               NULLIF(array_agg(DISTINCT a.key ORDER BY a.key), ARRAY[]::uuid[]) AS keys
         FROM crm.v_task_geom g
+        LEFT JOIN crm.tasks_area a
+          ON a.geom IS NOT NULL
+         AND NOT ST_IsEmpty(a.geom)
+         AND ST_Intersects(ST_MakeValid(g.geom), a.geom)
+        GROUP BY g.task_key
     ) s
     WHERE t.key = s.task_key
       AND t.area_key IS DISTINCT FROM s.keys;
@@ -284,9 +290,18 @@ BEGIN
         EXECUTE format(
             $q$
             UPDATE crm.%I s
-            SET area_key = crm.task_area_keys(g.geom)
-            FROM crm.v_task_geom g
-            WHERE s.task_key = g.task_key
+            SET area_key = x.keys
+            FROM (
+                SELECT g.task_key,
+                       NULLIF(array_agg(DISTINCT a.key ORDER BY a.key), ARRAY[]::uuid[]) AS keys
+                FROM crm.v_task_geom g
+                LEFT JOIN crm.tasks_area a
+                  ON a.geom IS NOT NULL
+                 AND NOT ST_IsEmpty(a.geom)
+                 AND ST_Intersects(ST_MakeValid(g.geom), a.geom)
+                GROUP BY g.task_key
+            ) x
+            WHERE s.task_key = x.task_key
               AND s.area_key IS NULL
             $q$,
             snap
