@@ -90,6 +90,7 @@ services:
       GENPLAN_SEARCH_RADIUS_M: ${GENPLAN_SEARCH_RADIUS_M:-1000}
       GENPLAN_FETCH_META_LIMIT: ${GENPLAN_FETCH_META_LIMIT:-0}
       PROJECT_DIR: /app
+      EXCEL_UPLOAD_DIR: /app/excel_inbox
     volumes:
       - .:/app
     command: ["python", "-m", "collector.scheduler"]

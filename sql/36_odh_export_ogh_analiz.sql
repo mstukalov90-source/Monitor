@@ -40,13 +40,15 @@ CREATE TABLE IF NOT EXISTS odh_export.ogh_analiz (
     "GUID"                      uuid,
     loaded_at                   timestamptz NOT NULL DEFAULT NOW(),
     ozn_date                    date,
-    executor                    text
+    executor                    text,
+    status                      text
 );
 
 -- Local-only fields (not in gis.ogh_analiz / ATTR_COLUMNS). Kept across nightly sync.
 ALTER TABLE odh_export.ogh_analiz
     ADD COLUMN IF NOT EXISTS ozn_date date,
-    ADD COLUMN IF NOT EXISTS executor text;
+    ADD COLUMN IF NOT EXISTS executor text,
+    ADD COLUMN IF NOT EXISTS status text;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_ogh_analiz_ordername
     ON odh_export.ogh_analiz ("OrderName");

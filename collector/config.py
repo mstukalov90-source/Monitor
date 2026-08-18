@@ -71,6 +71,7 @@ GENPLAN_FETCH_UUID_API_LIMIT = int(os.getenv("GENPLAN_FETCH_UUID_API_LIMIT", "0"
 GENPLAN_PHOTO_UPLOAD_DIR = PROJECT_DIR / "photo_to_upload"
 GENPLAN_PHOTO_UPLOADED_DIR = PROJECT_DIR / "photo_uploaded"
 GENPLAN_DOWNLOAD_DIR = PROJECT_DIR / "downloaded_photo"
+EXCEL_UPLOAD_DIR = Path(os.getenv("EXCEL_UPLOAD_DIR", str(PROJECT_DIR / "excel_inbox")))
 
 
 def _parse_int_list(raw: str, *, default: str) -> tuple[int, ...]:
@@ -234,3 +235,4 @@ LENS_STROYMONITORING_PURGE_FUNCTIONS_SQL = (
 DATA_MOS_LINE_TO_POLYGON_SQL = PROJECT_DIR / "sql" / "07_line_to_polygon.sql"
 DATA_MOS_GEOM_SPLIT_SQL = PROJECT_DIR / "sql" / "09_data_mos_geom_split.sql"
 OGH_ANALIZ_SQL = PROJECT_DIR / "sql" / "36_odh_export_ogh_analiz.sql"
+OZN_UPLOAD_LOG_SQL = PROJECT_DIR / "sql" / "38_odh_export_ozn_upload_log.sql"

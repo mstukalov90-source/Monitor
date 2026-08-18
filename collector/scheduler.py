@@ -20,6 +20,7 @@ Monthly (Europe/Moscow):
   backfill_ai_photo_tasks — one-time crm.tasks from genplan.photo_meta (manual)
   backfill_data_mos_crm_tasks — backfill crm.tasks for data_mos split tables (manual)
   ogh_analiz_sync_orders — one-time ogh_analiz rows by "OrderName" list (manual)
+  ozn_excel_inbox — every 15s: Excel from excel_inbox → ogh_analiz.ozn_date/executor
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from typing import Callable
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from collector.config import DATA_MOS_EXPORTS, DATA_MOS_MONTHLY_EXPORTS, TZ
 from collector.jobs import (
@@ -47,6 +49,7 @@ from collector.jobs import (
     lens_sync_job,
     ogh_analiz_sync_job,
     ogh_disruption_job,
+    ozn_excel_inbox_job,
     stroymonitoring_sync_job,
     vector_stroy_job,
 )
@@ -107,6 +110,7 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "genplan_upload_pipeline": run_genplan_upload_pipeline,
         "genplan_uuid_api_pipeline": run_genplan_uuid_api_pipeline,
         "vector_stroy_url_222": vector_stroy_job.run,
+        "ozn_excel_inbox": ozn_excel_inbox_job.run,
     }
     for config in DATA_MOS_EXPORTS:
         jobs[config.job_name] = lambda c=config: data_mos_job.run_for(c)
@@ -192,6 +196,16 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        ozn_excel_inbox_job.run,
+        IntervalTrigger(seconds=15, timezone=TZ),
+        id="ozn_excel_inbox",
+        name="Excel inbox → ogh_analiz ozn_date/executor",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     logger.info("Scheduler started (timezone=%s)", TZ)
     logger.info("  00:01 — genplan_uuid_api_pipeline")
     logger.info(
@@ -206,6 +220,7 @@ def start_scheduler() -> None:
     logger.info("  03:30 — crm_task_sync_audit")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  06:00 — vector_stroy_url_222")
+    logger.info("  every 15s — ozn_excel_inbox (excel_inbox → ozn_date/executor)")
     logger.info("  (genplan_pipeline — manual only: --run genplan_pipeline)")
     logger.info("  (genplan_upload — manual only: --run genplan_upload)")
     logger.info("  (genplan_fetch_uploaded — manual only: --run genplan_fetch_uploaded)")
