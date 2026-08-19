@@ -26,13 +26,6 @@ class CrmTaskSyncResult:
     tasked_parents: int = 0
 
 
-def _task_id_conflict_clause(task_column: str) -> str:
-    return (
-        f'ON CONFLICT ("{task_column}") '
-        f'WHERE "{task_column}" IS NOT NULL DO NOTHING'
-    )
-
-
 def _geom_hash_expr(geom_col: str = "t.geom") -> str:
     return f"md5(ST_AsEWKB(ST_SetSRID(ST_MakeValid({geom_col}), 4326)))"
 
@@ -75,9 +68,12 @@ def _insert_new_tasks(
             WHERE t.geom IS NOT NULL
               AND t.task_key IS NULL
               AND {business_id_expr} <> ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM crm.tasks ct
+                  WHERE ct."{task_column}" = {business_id_expr}
+              )
             ORDER BY {business_id_expr}, t.id
         ) src
-        {_task_id_conflict_clause(task_column)}
     """
     cur.execute(query, [cfg.group_name, audit, audit])
     return cur.rowcount

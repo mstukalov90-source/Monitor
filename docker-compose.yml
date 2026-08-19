@@ -41,6 +41,8 @@ services:
       - ./sql/34_dict_comms.sql:/docker-entrypoint-initdb.d/16-dict-comms.sql:ro
       - ./sql/35_dict_illegal_reson.sql:/docker-entrypoint-initdb.d/17-dict-illegal-reson.sql:ro
       - ./sql/36_odh_export_ogh_analiz.sql:/docker-entrypoint-initdb.d/18-odh-export-ogh-analiz.sql:ro
+      - ./sql/41_ogh_order_photo_log.sql:/docker-entrypoint-initdb.d/19-ogh-order-photo-log.sql:ro
+      - ./sql/42_situation_photo_log.sql:/docker-entrypoint-initdb.d/20-situation-photo-log.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s
@@ -91,8 +93,23 @@ services:
       GENPLAN_FETCH_META_LIMIT: ${GENPLAN_FETCH_META_LIMIT:-0}
       PROJECT_DIR: /app
       EXCEL_UPLOAD_DIR: /app/excel_inbox
+      OGH_ZAKAZY_DIR: ${OGH_ZAKAZY_DIR:-/mnt/monitor/ogh-zakazy}
+      SITUATION_DIR: ${SITUATION_DIR:-/mnt/monitor/situation}
+      OGH_ORDER_PHOTO_EDF_AFTER: ${OGH_ORDER_PHOTO_EDF_AFTER:-2026-08-15}
     volumes:
       - .:/app
+      - type: bind
+        source: ${OGH_ZAKAZY_HOST_DIR:-/mnt/monitor/ogh-zakazy}
+        target: /mnt/monitor/ogh-zakazy
+        read_only: true
+        bind:
+          propagation: rslave
+      - type: bind
+        source: ${SITUATION_HOST_DIR:-/mnt/monitor/situation}
+        target: /mnt/monitor/situation
+        read_only: true
+        bind:
+          propagation: rslave
     command: ["python", "-m", "collector.scheduler"]
 
   api:

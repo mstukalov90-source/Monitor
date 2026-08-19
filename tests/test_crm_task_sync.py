@@ -25,7 +25,9 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
         self.assertIn("DISTINCT ON", sql)
         self.assertIn("CONCAT('point:', t.id::text)", sql)
         self.assertIn("t.task_key IS NULL", sql)
-        self.assertIn('ON CONFLICT ("oati_id")', sql)
+        self.assertNotIn("ON CONFLICT", sql)
+        self.assertIn("NOT EXISTS", sql)
+        self.assertIn('ct."oati_id"', sql)
         self.assertIn("user_created", sql)
 
     def test_link_updates_split_and_anchor(self) -> None:

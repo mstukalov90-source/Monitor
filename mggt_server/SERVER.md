@@ -118,6 +118,7 @@ systemctl status nginx monitor-webcrm docker firewalld
 | Том | Назначение |
 |-----|------------|
 | `monitor_pgdata` | данные PostgreSQL/PostGIS — **сохранён** |
+| `/mnt/monitor/ogh-zakazy` → collector | CIFS Заказы **ro** (`bind-propagation: rslave`) |
 
 ```bash
 cd /opt/monitor && docker compose ps -a
@@ -193,4 +194,78 @@ firewall-cmd --list-rich-rules
 | `/opt/monitor/mggtfield_photo/` | полевые фото Android |
 | `/opt/monitor/jsons_genplan/` | вход JSON для `genplan` |
 | `/opt/monitor/photo_to_upload/` | очередь upload в MSI |
+| `/mnt/monitor/situation` | CIFS **read-only**: `\\len-fs02\bfiles$\situation` |
+| `/mnt/monitor/ogh-zakazy` | CIFS **read-only**: `\\mggt\work\Common\ОГХ\Заказы` |
 | Docker volume `monitor_pgdata` | БД `monitor` |
+
+---
+
+## CIFS-шары (read-only)
+
+Снимок **2026-08-19**. Обе шары смонтированы на хосте **только для чтения**. Collector видит обе через bind `ro` (`rslave`): `/mnt/monitor/ogh-zakazy` и `/mnt/monitor/situation`.
+
+| Параметр | Значение |
+|----------|----------|
+| Режим | **`ro`** (запись ядром отклоняется) |
+| Учётка | `MGGT\srv_opmonitoring` |
+| Credentials | `/root/.cifs-opmonitoring` (`chmod 600`, не в git) |
+| Пакеты | `cifs-utils`, `keyutils` |
+| SMB | `vers=3.0`, `sec=ntlmssp` |
+| fstab | `/etc/fstab` (бэкап: `/etc/fstab.bak.monitor-cifs`) |
+| Автомонтирование | systemd `x-systemd.automount`, idle-timeout 60 с, `_netdev,nofail` |
+
+| UNC | Локальная точка | Файл-сервер (факт) |
+|-----|-----------------|--------------------|
+| `\\len-fs02\bfiles$\situation` | `/mnt/monitor/situation` | `len-fs02.mggt` (`172.21.213.12:445`) |
+| `\\mggt\work\Common\ОГХ\Заказы` | `/mnt/monitor/ogh-zakazy` | DFS `mggt` (`172.16.15.101`) → `172.21.213.33` |
+
+Юниты (из fstab-generator, `is-enabled=generated`):
+
+- `mnt-monitor-situation.automount` / `.mount`
+- `mnt-monitor-ogh\x2dzakazy.automount` / `.mount`
+
+Проверка:
+
+```bash
+findmnt /mnt/monitor/situation /mnt/monitor/ogh-zakazy
+ls /mnt/monitor/situation | head
+ls /mnt/monitor/ogh-zakazy | head
+# запись должна падать: Read-only file system
+touch /mnt/monitor/situation/.ro_test
+```
+
+---
+
+## ogh_order_photo_upload (23:30)
+
+Залив полевых фото заказов ОГХ в MSI Holes `POST /api/upload`.
+
+| Параметр | Значение |
+|----------|----------|
+| Источник строк | `public.mview_mon_op_prod` (**SELECT only**) |
+| Фильтр | `ogno LIKE '12/ОГХ-%'`, `opernm = 'Проверка результатов съемки'`, `edf > 2026-08-15` |
+| Фото | `/mnt/monitor/ogh-zakazy/<хвост url после Заказы>/02_Поле/Фото` |
+| Инкремент | `genplan.ogh_order_photo_log` (`source_relpath` UNIQUE) |
+| Шара | read-only, файлы не удаляются |
+| Cron | **23:30** Europe/Moscow (`max_instances=1`) |
+| Dry-run | `docker compose exec collector python -m collector.scheduler --run ogh_order_photo_upload_dry` |
+
+Первый live-прогон 2026-08-19: dry-run `rows=68 ok_dirs=63 photos=3106 missing=3 bad_url=2`.
+
+---
+
+## situation_photo_upload (23:00)
+
+Залив фото situation в MSI Holes `POST /api/upload`. Идёт **раньше** `ogh_order_photo_upload` (23:30).
+
+| Параметр | Значение |
+|----------|----------|
+| Источник строк | `public.mview_mon_op_prod` JOIN `public.mview_mon_op_files` (**SELECT only**) |
+| Фильтр | `(ono IS NULL OR ono NOT LIKE '12/ОГХ-%')`, `opernm = 'Проверка результатов съемки'`, `edf > 2026-08-15` |
+| Путь | `fnm` от корня `/mnt/monitor/situation` (файл или папка с фото) |
+| Инкремент | `genplan.situation_photo_log` (`source_relpath` UNIQUE) |
+| Шара | read-only, файлы не удаляются |
+| Cron | **23:00** Europe/Moscow (`max_instances=1`) |
+| Dry-run | `docker compose exec collector python -m collector.scheduler --run situation_photo_upload_dry` |
+
+Первый live-прогон 2026-08-19: dry-run `prod_rows=129 file_rows=369 photos=369 missing=0 bad_fnm=0`. Live: **369 uploaded, 0 failed**. Заказы: `84/11-26/00043`, `3/ДЖКХ-26/00265`, `СИС-25/00062`.

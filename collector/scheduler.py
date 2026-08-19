@@ -21,6 +21,10 @@ Monthly (Europe/Moscow):
   backfill_data_mos_crm_tasks — backfill crm.tasks for data_mos split tables (manual)
   ogh_analiz_sync_orders — one-time ogh_analiz rows by "OrderName" list (manual)
   ozn_excel_inbox — every 15s: Excel from excel_inbox → ogh_analiz.ozn_date/executor
+  23:00 — situation_photo_upload: situation share photos → MSI Holes (read-only share)
+  situation_photo_upload_dry — same SELECT/path inspect, no API
+  23:30 — ogh_order_photo_upload: OGH Заказы field photos → MSI Holes (read-only share)
+  ogh_order_photo_upload_dry — same SELECT/path inspect, no API
 """
 
 from __future__ import annotations
@@ -49,7 +53,9 @@ from collector.jobs import (
     lens_sync_job,
     ogh_analiz_sync_job,
     ogh_disruption_job,
+    ogh_order_photo_upload_job,
     ozn_excel_inbox_job,
+    situation_photo_upload_job,
     stroymonitoring_sync_job,
     vector_stroy_job,
 )
@@ -111,6 +117,10 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "genplan_uuid_api_pipeline": run_genplan_uuid_api_pipeline,
         "vector_stroy_url_222": vector_stroy_job.run,
         "ozn_excel_inbox": ozn_excel_inbox_job.run,
+        "ogh_order_photo_upload": ogh_order_photo_upload_job.run,
+        "ogh_order_photo_upload_dry": ogh_order_photo_upload_job.run_dry,
+        "situation_photo_upload": situation_photo_upload_job.run,
+        "situation_photo_upload_dry": situation_photo_upload_job.run_dry,
     }
     for config in DATA_MOS_EXPORTS:
         jobs[config.job_name] = lambda c=config: data_mos_job.run_for(c)
@@ -205,6 +215,24 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        situation_photo_upload_job.run,
+        CronTrigger(hour=23, minute=0, timezone=TZ),
+        id="situation_photo_upload",
+        name="situation share photos → MSI Holes",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        ogh_order_photo_upload_job.run,
+        CronTrigger(hour=23, minute=30, timezone=TZ),
+        id="ogh_order_photo_upload",
+        name="OGH Заказы field photos → MSI Holes",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
     logger.info("Scheduler started (timezone=%s)", TZ)
     logger.info("  00:01 — genplan_uuid_api_pipeline")
@@ -220,6 +248,8 @@ def start_scheduler() -> None:
     logger.info("  03:30 — crm_task_sync_audit")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  06:00 — vector_stroy_url_222")
+    logger.info("  23:00 — situation_photo_upload (situation fnm → genplan API)")
+    logger.info("  23:30 — ogh_order_photo_upload (Заказы/02_Поле/Фото → genplan API)")
     logger.info("  every 15s — ozn_excel_inbox (excel_inbox → ozn_date/executor)")
     logger.info("  (genplan_pipeline — manual only: --run genplan_pipeline)")
     logger.info("  (genplan_upload — manual only: --run genplan_upload)")
@@ -229,6 +259,8 @@ def start_scheduler() -> None:
     logger.info("  (backfill_ai_photo_tasks — manual only: --run backfill_ai_photo_tasks)")
     logger.info("  (backfill_data_mos_crm_tasks — manual only: --run backfill_data_mos_crm_tasks)")
     logger.info("  (ogh_analiz_sync_orders — manual only: --run ogh_analiz_sync_orders)")
+    logger.info("  (ogh_order_photo_upload_dry — manual only: --run ogh_order_photo_upload_dry)")
+    logger.info("  (situation_photo_upload_dry — manual only: --run situation_photo_upload_dry)")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
