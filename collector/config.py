@@ -150,6 +150,14 @@ MGGT_ASU_DB = {
     "password": os.getenv("MGGT_ASU_DB_PASSWORD", ""),
 }
 
+MGGT_DB = {
+    "host": os.getenv("MGGT_DB_HOST", "172.21.212.19"),
+    "port": int(os.getenv("MGGT_DB_PORT", "5432")),
+    "dbname": os.getenv("MGGT_DB_NAME", "mggt"),
+    "user": os.getenv("MGGT_DB_USER", "postgres"),
+    "password": os.getenv("MGGT_DB_PASSWORD", ""),
+}
+
 STROYMONITORING_REMOTE_SCHEMA = "public"
 STROYMONITORING_REMOTE_TABLE = "boundaries_aip"
 STROYMONITORING_LOCAL_SCHEMA = "stroymonitoring"
@@ -241,6 +249,9 @@ LENS_STROYMONITORING_PURGE_FUNCTIONS_SQL = (
 DATA_MOS_LINE_TO_POLYGON_SQL = PROJECT_DIR / "sql" / "07_line_to_polygon.sql"
 DATA_MOS_GEOM_SPLIT_SQL = PROJECT_DIR / "sql" / "09_data_mos_geom_split.sql"
 OGH_ANALIZ_SQL = PROJECT_DIR / "sql" / "36_odh_export_ogh_analiz.sql"
+OGH_DISRUPTION_TOPOTEXT_SQL = (
+    PROJECT_DIR / "sql" / "44_odh_export_ogh_disruption_source_fid.sql"
+)
 OZN_UPLOAD_LOG_SQL = PROJECT_DIR / "sql" / "38_odh_export_ozn_upload_log.sql"
 OGH_ORDER_PHOTO_LOG_SQL = PROJECT_DIR / "sql" / "41_ogh_order_photo_log.sql"
 SITUATION_PHOTO_LOG_SQL = PROJECT_DIR / "sql" / "42_situation_photo_log.sql"

@@ -43,6 +43,9 @@ services:
       - ./sql/36_odh_export_ogh_analiz.sql:/docker-entrypoint-initdb.d/18-odh-export-ogh-analiz.sql:ro
       - ./sql/41_ogh_order_photo_log.sql:/docker-entrypoint-initdb.d/19-ogh-order-photo-log.sql:ro
       - ./sql/42_situation_photo_log.sql:/docker-entrypoint-initdb.d/20-situation-photo-log.sql:ro
+      - ./sql/43_dit_detect_ai_results.sql:/docker-entrypoint-initdb.d/21-dit-detect-ai-results.sql:ro
+      - ./sql/44_odh_export_ogh_disruption_source_fid.sql:/docker-entrypoint-initdb.d/22-odh-export-ogh-disruption-source-fid.sql:ro
+      - ./sql/45_crm_iter_task_geom_ogh_disruption.sql:/docker-entrypoint-initdb.d/23-crm-iter-task-geom-ogh-disruption.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s
@@ -80,6 +83,11 @@ services:
       MGGT_ASU_DB_NAME: ${MGGT_ASU_DB_NAME:-mggt_asu}
       MGGT_ASU_DB_USER: ${MGGT_ASU_DB_USER:-mstukalov}
       MGGT_ASU_DB_PASSWORD: ${MGGT_ASU_DB_PASSWORD:-}
+      MGGT_DB_HOST: ${MGGT_DB_HOST:-172.21.212.19}
+      MGGT_DB_PORT: ${MGGT_DB_PORT:-5432}
+      MGGT_DB_NAME: ${MGGT_DB_NAME:-mggt}
+      MGGT_DB_USER: ${MGGT_DB_USER:-postgres}
+      MGGT_DB_PASSWORD: ${MGGT_DB_PASSWORD:-}
       DATA_MOS_API_KEY: ${DATA_MOS_API_KEY:-}
       MSI_HOLES_CLIENT_ID: ${MSI_HOLES_CLIENT_ID:-}
       MSI_HOLES_CLIENT_SECRET: ${MSI_HOLES_CLIENT_SECRET:-}

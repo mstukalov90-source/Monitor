@@ -11,7 +11,7 @@ from typing import Generator, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from collector.config import LOCAL_DB, MGGT_ASU_DB, REMOTE_DB, WEB_GEO_DB
+from collector.config import LOCAL_DB, MGGT_ASU_DB, MGGT_DB, REMOTE_DB, WEB_GEO_DB
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,25 @@ def mggt_asu_connection() -> Generator[psycopg2.extensions.connection, None, Non
         )
     conn = psycopg2.connect(
         **_conn_params(MGGT_ASU_DB),
+        options="-c default_transaction_read_only=on",
+    )
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def mggt_connection() -> Generator[psycopg2.extensions.connection, None, None]:
+    """Read-only session to mggt. Never commit; writes are rejected by Postgres."""
+    password = MGGT_DB.get("password") or ""
+    if not str(password).strip():
+        raise ValueError(
+            "MGGT_DB_PASSWORD is empty. Set it in the project .env file, then recreate "
+            "the collector container: docker compose up -d collector"
+        )
+    conn = psycopg2.connect(
+        **_conn_params(MGGT_DB),
         options="-c default_transaction_read_only=on",
     )
     try:

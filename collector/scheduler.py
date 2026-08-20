@@ -8,6 +8,9 @@ Daily schedule (Europe/Moscow):
   03:30 — crm_task_sync_audit
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
   06:00 — vector_stroy_url_222: fetch map221/rs_2022 + DROP + GeoJSON upsert
+  22:00 — ogh_disruption_topotext: matching topopassport.topotext → odh_export.ogh-disruption
+  22:15 — ogh_disruption_topo_texts: matching t500.topo_texts (mggt) → odh_export.ogh-disruption
+  22:25 — ogh_disruption_crm_tasks: new odh_export.ogh-disruption rows → crm.tasks
 
 Monthly (Europe/Moscow):
   01:00 first Saturday — data_mos_60562 (export + TRUNCATE load, no purge/split)
@@ -52,7 +55,10 @@ from collector.jobs import (
     genplan_upload_job,
     lens_sync_job,
     ogh_analiz_sync_job,
+    ogh_disruption_crm_tasks_job,
     ogh_disruption_job,
+    ogh_disruption_topo_texts_job,
+    ogh_disruption_topotext_job,
     ogh_order_photo_upload_job,
     ozn_excel_inbox_job,
     situation_photo_upload_job,
@@ -100,6 +106,9 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "ogh_analiz_sync": ogh_analiz_sync_job.run,
         "ogh_analiz_sync_orders": ogh_analiz_sync_job.run_orders_once,
         "ogh_disruption": ogh_disruption_job.run,
+        "ogh_disruption_topotext": ogh_disruption_topotext_job.run,
+        "ogh_disruption_topo_texts": ogh_disruption_topo_texts_job.run,
+        "ogh_disruption_crm_tasks": ogh_disruption_crm_tasks_job.run,
         "lens_pipeline": run_lens_pipeline,
         "lens_sync": lens_sync_job.run,
         "stroymonitoring_sync": stroymonitoring_sync_job.run,
@@ -205,6 +214,27 @@ def start_scheduler() -> None:
         name="Vector stroy url_222 fetch + DROP + GeoJSON upsert",
         replace_existing=True,
     )
+    scheduler.add_job(
+        ogh_disruption_topotext_job.run,
+        CronTrigger(hour=22, minute=0, timezone=TZ),
+        id="ogh_disruption_topotext",
+        name="Read-only topotext labels (mggt_asu → odh_export.ogh-disruption)",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        ogh_disruption_topo_texts_job.run,
+        CronTrigger(hour=22, minute=15, timezone=TZ),
+        id="ogh_disruption_topo_texts",
+        name="Read-only t500.topo_texts labels (mggt → odh_export.ogh-disruption)",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        ogh_disruption_crm_tasks_job.run,
+        CronTrigger(hour=22, minute=25, timezone=TZ),
+        id="ogh_disruption_crm_tasks",
+        name="New odh_export.ogh-disruption rows → crm.tasks",
+        replace_existing=True,
+    )
 
     scheduler.add_job(
         ozn_excel_inbox_job.run,
@@ -248,6 +278,9 @@ def start_scheduler() -> None:
     logger.info("  03:30 — crm_task_sync_audit")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  06:00 — vector_stroy_url_222")
+    logger.info("  22:00 — ogh_disruption_topotext (mggt_asu topopassport.topotext)")
+    logger.info("  22:15 — ogh_disruption_topo_texts (mggt t500.topo_texts)")
+    logger.info("  22:25 — ogh_disruption_crm_tasks (ogh-disruption → crm.tasks)")
     logger.info("  23:00 — situation_photo_upload (situation fnm → genplan API)")
     logger.info("  23:30 — ogh_order_photo_upload (Заказы/02_Поле/Фото → genplan API)")
     logger.info("  every 15s — ozn_excel_inbox (excel_inbox → ozn_date/executor)")

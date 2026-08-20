@@ -12,6 +12,9 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 | 03:00 | `data_mos` | Vse 8 ezhednevnykh eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
 | 06:00 | `vector_stroy_url_222` | Chitaet token iz `Vector_py/token.md`, skachivaet GeoJSON map221/rs_2022 s vector.mka.mos.ru, DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; pri otsutstvii tokena ili oshibke API — propusk |
+| 22:00 | `ogh_disruption_topotext` | Read-only `topopassport.topotext` iz `mggt_asu` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` |
+| 22:15 | `ogh_disruption_topo_texts` | Read-only `t500.topo_texts` iz `mggt` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` pri `filter_pass=topo_texts` |
+| 22:25 | `ogh_disruption_crm_tasks` | Novye stroki `odh_export."ogh-disruption"` → `crm.tasks` (tip «Разрытия», `ogh_id` = `id`). Tolko otsutstvuyushchie `ogh_id` (`NOT EXISTS`) |
 
 `genplan_pipeline` (`genplan_fetch` + import) — **tolko ruchnoy zapusk**: `--run genplan_pipeline`
 
@@ -191,6 +194,9 @@ docker compose exec collector python -m collector.scheduler --run genplan_downlo
 docker compose exec collector python -m collector.scheduler --run backfill_ai_photo_tasks
 docker compose exec collector python -m collector.scheduler --run genplan
 docker compose exec collector python -m collector.scheduler --run ogh_disruption
+docker compose exec collector python -m collector.scheduler --run ogh_disruption_topotext
+docker compose exec collector python -m collector.scheduler --run ogh_disruption_topo_texts
+docker compose exec collector python -m collector.scheduler --run ogh_disruption_crm_tasks
 docker compose exec collector python -m collector.scheduler --run ogh_analiz_sync
 docker compose exec collector python -m collector.scheduler --run vector_stroy_url_222
 
@@ -239,6 +245,52 @@ docker compose exec -T db psql -U monitor -d monitor < sql/36_odh_export_ogh_ana
 docker compose up -d collector   # perechitat env posle izmeneniya .env
 
 docker compose exec collector python -m collector.scheduler --run ogh_analiz_sync
+```
+
+### ogh_disruption_topotext (mggt_asu, read-only)
+
+Istochnik: `MGGT_ASU_DB_*` → `topopassport.topotext`. Priemnik: `odh_export."ogh-disruption"` (`label_text` ← `text`, `source_json` ← `"Number"`, `geometry`/`lon`/`lat` iz `"Geometry"`). Collector chitaet istochnik **tolko SELECT**; `ST_SetSRID(..., 980077)` + `ST_Transform(..., 4326)` — na lokalnoy BD. Unikalnyy klyuch: `(source_json, lon, lat)`. Watermark: `MAX(source_fid) WHERE filter_pass = 'topotext'`.
+
+Migratsiya (sushchestvuyushchaya BD):
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/44_odh_export_ogh_disruption_source_fid.sql
+```
+
+```bash
+docker compose exec collector python -m collector.scheduler --run ogh_disruption_topotext
+```
+
+### ogh_disruption_topo_texts (mggt, read-only)
+
+Istochnik: `MGGT_DB_*` → `t500.topo_texts`. Priemnik: `odh_export."ogh-disruption"` (`label_text` ← `label`, `source_json` ← `base_name`, `geometry`/`lon`/`lat` iz `geom`). Collector chitaet istochnik **tolko SELECT**; `ST_SetSRID(..., 980077)` + `ST_Force2D(ST_PointOnSurface(ST_Transform(..., 4326)))` — na lokalnoy BD. Unikalnyy klyuch: `(source_json, lon, lat)`. Watermark: `MAX(source_fid) WHERE filter_pass = 'topo_texts'`. Filtr `label`: tochnoe sovpadenie posle `btrim`.
+
+Migratsiya (sushchestvuyushchaya BD, ta zhe kolonka `source_fid`):
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/44_odh_export_ogh_disruption_source_fid.sql
+```
+
+```bash
+# V korne proekta v faile .env (ne tolko .env.example):
+# MGGT_DB_PASSWORD=ваш_пароль
+docker compose up -d collector   # perechitat env posle izmeneniya .env
+
+docker compose exec collector python -m collector.scheduler --run ogh_disruption_topo_texts
+```
+
+### ogh_disruption_crm_tasks (22:25)
+
+Sozdaet zadachi v `crm.tasks` (tip «Разрытия») dlya strok `odh_export."ogh-disruption"` s `geometry`, esli eshche net `crm.tasks.ogh_id`. Yakorit `source_table` / `source_row_id` / `source_geom_hash` i obnovlyaet `area_key`.
+
+Migratsiya (sushchestvuyushchaya BD, `crm.iter_task_geom` + ogh-disruption):
+
+```bash
+docker compose exec -T db psql -U monitor -d monitor < sql/45_crm_iter_task_geom_ogh_disruption.sql
+```
+
+```bash
+docker compose exec collector python -m collector.scheduler --run ogh_disruption_crm_tasks
 ```
 
 ## Proverka logov zadach

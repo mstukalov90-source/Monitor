@@ -5,6 +5,7 @@ CREATE SCHEMA IF NOT EXISTS lens;
 CREATE SCHEMA IF NOT EXISTS stroymonitoring;
 CREATE SCHEMA IF NOT EXISTS genplan;
 CREATE SCHEMA IF NOT EXISTS odh_export;
+CREATE SCHEMA IF NOT EXISTS dit_detect;
 
 -- ogh-disruption table shell: sql/11_odh_export_ogh_disruption.sql (mounted in docker-compose initdb)
 -- mggt_station tables: sql/20_mggt_station_tables.sql (mounted in docker-compose initdb)
