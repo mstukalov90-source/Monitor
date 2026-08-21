@@ -387,7 +387,7 @@ Ezhednevnyy cron **00:01** Europe/Moscow (takzhe ruchnoy zapusk). Istochnik UUID
 Tsepochka `genplan_uuid_api_pipeline`:
 
 1. `genplan_fetch_uuid_api` — pending UUID (net v `photo_meta` ili `status <> 'done'`) → MSI `GET /api/photos/meta/{uuid}` → upsert v `genplan.photo_meta`. 404 = meta eshche ne gotova (skip).
-2. `backfill_ai_photo_tasks` — sozdaet zadachi v `crm.tasks` (tip «Разрытия») dlya strok `photo_meta` s `disruption IS TRUE` i `geom`, esli eshche net `crm.tasks.photo_uuid`.
+2. `backfill_ai_photo_tasks` — sozdaet zadachi v `crm.tasks` (tip «Разрытия») dlya strok `photo_meta` s `disruption IS TRUE` i `geom`. Esli `cam_id` ne NULL i dlya kamery uzhe est ETL-zadacha (`field_observed` ne true, `user_last_edit` soderzhit `etl`) — obnovlyaet `photo_uuid` sushchestvuyushchey zadachi vmesto insert. Pri `cam_id` NULL ili esli zadachu trogal ne ETL / `field_observed=true` — sozdaet novuyu, esli eshche net `crm.tasks.photo_uuid`.
 3. `genplan_download` — skachivaet JPEG/PNG vseh snimkov s `disruption = true` (i `geom`) iz MSI `GET /api/photos/images/{uuid}` v `downloaded_photo/` kak `{uuid}.ext`. Netu fayla na diske — povtor na kazhdom cron; uzhe lezhashchie (v tom chisle legacy po `image_name`) propuskayutsya.
 
 ```bash

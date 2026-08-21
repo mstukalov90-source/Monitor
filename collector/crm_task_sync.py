@@ -24,6 +24,7 @@ class CrmTaskSyncResult:
     inserted: int = 0
     linked: int = 0
     tasked_parents: int = 0
+    updated: int = 0
 
 
 def _geom_hash_expr(geom_col: str = "t.geom") -> str:
@@ -140,5 +141,19 @@ def sync_crm_tasks_after_etl(cur: Any, parent_table_name: str) -> CrmTaskSyncRes
 
 
 def refresh_task_area_keys(cur: Any) -> None:
-    """Recompute crm.tasks.area_key from geometry ∩ crm.tasks_area."""
+    """Recompute crm.tasks.area_key from geometry ∩ crm.tasks_area.
+
+    No-op when sql/39 was not applied (prod .219).
+    """
+    cur.execute(
+        """
+        SELECT 1
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'crm' AND p.proname = 'refresh_task_area_keys'
+        """
+    )
+    if cur.fetchone() is None:
+        logger.info("crm.refresh_task_area_keys() missing, skip area_key refresh")
+        return
     cur.execute("CALL crm.refresh_task_area_keys()")

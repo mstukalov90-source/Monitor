@@ -49,6 +49,7 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
     def test_sync_runs_for_known_service(self) -> None:
         cur = MagicMock()
         cur.rowcount = 1
+        cur.fetchone.return_value = (1,)
         result = sync_crm_tasks_after_etl(cur, "items_2855")
         self.assertGreaterEqual(cur.execute.call_count, 8)
         self.assertEqual(cur.execute.call_args_list[-1][0][0], "CALL crm.refresh_task_area_keys()")
@@ -69,6 +70,7 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
     def test_sync_refreshes_tasked_bidirectionally(self) -> None:
         cur = MagicMock()
         cur.rowcount = 1
+        cur.fetchone.return_value = (1,)
         sync_crm_tasks_after_etl(cur, "items_2855")
         tasked_sqls = [
             call.args[0]

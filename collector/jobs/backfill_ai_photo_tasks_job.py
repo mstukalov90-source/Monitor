@@ -22,7 +22,10 @@ def run() -> None:
             with conn.cursor() as cur:
                 result = sync_ai_photo_tasks(cur)
 
-        message = f"inserted={result.inserted} anchored={result.linked}"
+        message = (
+            f"inserted={result.inserted} updated={result.updated} "
+            f"anchored={result.linked}"
+        )
         with local_connection() as conn:
             log_job_run(
                 conn,

@@ -63,6 +63,65 @@ def _etl_audit() -> list[str]:
     return [ETL_SYNC_LOGIN, stamp]
 
 
+def _etl_login_sql() -> str:
+    return "'" + ETL_SYNC_LOGIN.replace("'", "''") + "'"
+
+
+def _eligible_cam_task_exists_sql(cam_id_expr: str) -> str:
+    """True when an ETL-owned, unobserved crm.tasks row already covers this camera."""
+    return f"""EXISTS (
+            SELECT 1
+            FROM crm.tasks ct
+            JOIN genplan.photo_meta pm ON pm.uuid = ct.photo_uuid
+            WHERE pm.cam_id IS NOT NULL
+              AND pm.cam_id = {cam_id_expr}
+              AND ct.field_observed IS NOT TRUE
+              AND {_etl_login_sql()} = ANY(ct.user_last_edit)
+        )"""
+
+
+def _reuse_ai_photo_tasks(cur: Any) -> int:
+    """Point the latest eligible ETL task per camera at the newest photo_meta uuid."""
+    audit = _etl_audit()
+    geom_hash = _geom_hash_expr("src.geom")
+    query = f"""
+        UPDATE crm.tasks ct
+        SET photo_uuid = src.uuid,
+            source_table = %s,
+            source_row_id = src.id,
+            source_geom_hash = {geom_hash},
+            user_last_edit = %s::text[]
+        FROM (
+            SELECT DISTINCT ON (t.cam_id)
+                t.id,
+                NULLIF(TRIM(t.uuid::text), '') AS uuid,
+                t.cam_id,
+                t.geom
+            FROM genplan.photo_meta t
+            WHERE t.disruption IS TRUE
+              AND t.geom IS NOT NULL
+              AND t.cam_id IS NOT NULL
+              AND NULLIF(TRIM(t.uuid::text), '') IS NOT NULL
+            ORDER BY t.cam_id, t.id DESC
+        ) src
+        JOIN LATERAL (
+            SELECT ct2.key
+            FROM crm.tasks ct2
+            JOIN genplan.photo_meta old_pm ON old_pm.uuid = ct2.photo_uuid
+            WHERE old_pm.cam_id IS NOT NULL
+              AND old_pm.cam_id = src.cam_id
+              AND ct2.field_observed IS NOT TRUE
+              AND {_etl_login_sql()} = ANY(ct2.user_last_edit)
+            ORDER BY ct2.key DESC
+            LIMIT 1
+        ) existing ON TRUE
+        WHERE ct.key = existing.key
+          AND ct.photo_uuid IS DISTINCT FROM src.uuid
+    """
+    cur.execute(query, [AI_PHOTO_SYNC.source_table, audit])
+    return cur.rowcount
+
+
 def _insert_photo_tasks(cur: Any, cfg: PhotoLayerSync) -> int:
     task_column = cfg.task_column
     business_id = _business_id_expr(cfg)
@@ -81,14 +140,35 @@ def _insert_photo_tasks(cur: Any, cfg: PhotoLayerSync) -> int:
     ]
     if cfg.sql_filter:
         filters.append(cfg.sql_filter)
+    if cfg == AI_PHOTO_SYNC:
+        filters.append(
+            f"""(
+                t.cam_id IS NULL
+                OR NOT {_eligible_cam_task_exists_sql("t.cam_id")}
+            )"""
+        )
 
     where = " AND ".join(filters)
-    query = f"""
-        INSERT INTO crm.tasks ({col_list})
-        SELECT %s, {id_values}, %s::text[], %s::text[]
-        FROM {cfg.source_table} t
-        WHERE {where}
-    """
+    if cfg == AI_PHOTO_SYNC:
+        distinct_key = f"COALESCE(t.cam_id::text, {business_id})"
+        query = f"""
+            INSERT INTO crm.tasks ({col_list})
+            SELECT %s, {id_values}, %s::text[], %s::text[]
+            FROM (
+                SELECT DISTINCT ON ({distinct_key})
+                    t.*
+                FROM {cfg.source_table} t
+                WHERE {where}
+                ORDER BY {distinct_key}, t.id DESC
+            ) t
+        """
+    else:
+        query = f"""
+            INSERT INTO crm.tasks ({col_list})
+            SELECT %s, {id_values}, %s::text[], %s::text[]
+            FROM {cfg.source_table} t
+            WHERE {where}
+        """
     cur.execute(query, [cfg.group_name, audit, audit])
     return cur.rowcount
 
@@ -111,17 +191,20 @@ def _anchor_photo_tasks(cur: Any, cfg: PhotoLayerSync) -> int:
 
 
 def sync_photo_layer_tasks(cur: Any, cfg: PhotoLayerSync) -> CrmTaskSyncResult:
-    """Insert missing crm.tasks for one photo layer."""
+    """Insert missing crm.tasks for one photo layer; reuse AI tasks per camera."""
     result = CrmTaskSyncResult()
+    if cfg == AI_PHOTO_SYNC:
+        result.updated = _reuse_ai_photo_tasks(cur)
     result.inserted = _insert_photo_tasks(cur, cfg)
     anchored = _anchor_photo_tasks(cur, cfg)
     result.linked = anchored
     refresh_task_area_keys(cur)
 
     logger.info(
-        "crm_photo_task_sync %s: inserted=%s anchored=%s",
+        "crm_photo_task_sync %s: inserted=%s updated=%s anchored=%s",
         cfg.source_table,
         result.inserted,
+        result.updated,
         anchored,
     )
     return result
