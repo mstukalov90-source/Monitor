@@ -293,6 +293,15 @@ docker compose exec -T db psql -U monitor -d monitor < sql/45_crm_iter_task_geom
 docker compose exec collector python -m collector.scheduler --run ogh_disruption_crm_tasks
 ```
 
+### crm.tasks.status (sql/46) — только SWEB `.161`
+
+Колонка `crm.tasks.status` (`active` / `field` / `legal` / `illegal` / `clear` / `delay`) и триггеры на спутниках, включая возврат в `active` при DELETE. **Не применять на проде `172.21.198.219`.**
+
+```bash
+# test SWEB only
+ssh root@77.222.63.161 'cd /opt/monitor && docker compose exec -T db psql -U monitor -d monitor' < sql/46_crm_tasks_status.sql
+```
+
 ## Proverka logov zadach
 
 ```sql

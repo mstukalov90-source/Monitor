@@ -1,0 +1,15 @@
+[Unit]
+Description=MONITOR weekly OSRM graph update (Moscow OSM, car/bicycle/foot)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/monitor
+Environment=TZ=Europe/Moscow
+ExecStart=/opt/monitor/scripts/osrm_update.sh
+Nice=10
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

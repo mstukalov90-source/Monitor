@@ -46,6 +46,7 @@ services:
       - ./sql/43_dit_detect_ai_results.sql:/docker-entrypoint-initdb.d/21-dit-detect-ai-results.sql:ro
       - ./sql/44_odh_export_ogh_disruption_source_fid.sql:/docker-entrypoint-initdb.d/22-odh-export-ogh-disruption-source-fid.sql:ro
       - ./sql/45_crm_iter_task_geom_ogh_disruption.sql:/docker-entrypoint-initdb.d/23-crm-iter-task-geom-ogh-disruption.sql:ro
+      - ./sql/46_crm_tasks_status.sql:/docker-entrypoint-initdb.d/24-crm-tasks-status.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s
@@ -145,6 +146,74 @@ services:
     volumes:
       - .:/app
     command: ["uvicorn", "collector.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  # OSRM: run scripts/osrm_update.sh before the first start (creates osrm-data/current).
+  # Profile "osrm" keeps `docker compose up -d` from mounting empty dirs.
+  osrm-car:
+    image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:26.8-debian}
+    container_name: monitor-osrm-car
+    profiles: ["osrm"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OSRM_CAR_PORT:-5000}:5000"
+    volumes:
+      - ./osrm-data/current/car:/data:ro
+    command: ["osrm-routed", "--algorithm", "mld", "/data/moscow-latest.osrm"]
+    mem_limit: 2g
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "grep -q ':1388 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  osrm-bicycle:
+    image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:26.8-debian}
+    container_name: monitor-osrm-bicycle
+    profiles: ["osrm"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OSRM_BICYCLE_PORT:-5001}:5000"
+    volumes:
+      - ./osrm-data/current/bicycle:/data:ro
+    command: ["osrm-routed", "--algorithm", "mld", "/data/moscow-latest.osrm"]
+    mem_limit: 2g
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "grep -q ':1388 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  osrm-foot:
+    image: ${OSRM_IMAGE:-ghcr.io/project-osrm/osrm-backend:26.8-debian}
+    container_name: monitor-osrm-foot
+    profiles: ["osrm"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OSRM_FOOT_PORT:-5002}:5000"
+    volumes:
+      - ./osrm-data/current/foot:/data:ro
+    command: ["osrm-routed", "--algorithm", "mld", "/data/moscow-latest.osrm"]
+    mem_limit: 2560m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "grep -q ':1388 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   pgdata:

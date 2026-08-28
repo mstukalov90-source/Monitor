@@ -87,6 +87,52 @@ docker compose ps
 - `monitor-collector` — планировщик ETL
 - `monitor-api` — M2M HTTP API (порт `8000`; снаружи для смежников — через домен `:443` → nginx `:80`)
 
+OSRM (авто / вело / пеший) в том же compose, но в профиле `osrm` — **не** стартует вместе с `up -d --build`. Сначала собрать граф, иначе Docker создаст пустые каталоги вместо symlink `osrm-data/current`.
+
+```bash
+cd /opt/monitor
+chmod +x scripts/osrm_update.sh scripts/osrm_rollback.sh
+./scripts/osrm_update.sh
+docker compose up -d osrm-car osrm-bicycle osrm-foot
+```
+
+Карта Москвы: OSM extract (ODbL), ~105 МБ PBF. Первый прогон 10–20 минут. Данные в `/opt/monitor/osrm-data/` (не в git).
+
+Nginx (корпсеть / VPN, не шлюз и не интернет):
+
+```bash
+cp /opt/monitor/mggt_server/nginx/monitor-webcrm.conf /etc/nginx/conf.d/monitor-webcrm.conf
+nginx -t && systemctl reload nginx
+```
+
+Еженедельное обновление графа (вс 07:00 Europe/Moscow):
+
+```bash
+cp /opt/monitor/mggt_server/systemd/monitor-osrm-update.service /etc/systemd/system/
+cp /opt/monitor/mggt_server/systemd/monitor-osrm-update.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now monitor-osrm-update.timer
+systemctl list-timers monitor-osrm-update.timer
+```
+
+Ручной прогон / откат:
+
+```bash
+./scripts/osrm_update.sh                 # или: systemctl start monitor-osrm-update.service
+OSRM_FORCE=1 ./scripts/osrm_update.sh    # пересобрать даже если PBF не менялся
+./scripts/osrm_rollback.sh               # вернуть предыдущий build
+```
+
+Клиенты (координаты **lon,lat** WGS84):
+
+```
+http://172.21.198.219/osrm/route/v1/driving/{lon},{lat};{lon},{lat}
+http://172.21.198.219/osrm/route/v1/bike/{lon},{lat};{lon},{lat}
+http://172.21.198.219/osrm/route/v1/foot/{lon},{lat};{lon},{lat}
+```
+
+Порты `:5000`–`:5002` только на `127.0.0.1`. Снаружи `/osrm/` — **403**.
+
 ## 4. Перенос базы данных с локальной машины
 
 Выполняется **на компьютере**, где уже есть рабочая БД с нужными данными.
@@ -134,6 +180,13 @@ docker compose ps
 docker compose logs collector --tail 100
 curl -sS http://127.0.0.1:8000/health
 curl -sS https://monitor-crm.mggt.ru/health   # с хоста с интернетом / SWEB
+
+# OSRM (после osrm_update.sh + nginx reload). Ожидание: "code":"Ok"
+curl -sS "http://127.0.0.1:5000/nearest/v1/driving/37.6173,55.7558"
+curl -sS "http://127.0.0.1/osrm/route/v1/driving/37.6173,55.7558;37.65,55.76?overview=false"
+curl -sS "http://127.0.0.1/osrm/route/v1/bike/37.6173,55.7558;37.65,55.76?overview=false"
+curl -sS "http://127.0.0.1/osrm/route/v1/foot/37.6173,55.7558;37.65,55.76?overview=false"
+docker compose ps osrm-car osrm-bicycle osrm-foot
 ```
 
 Ручной запуск задач:

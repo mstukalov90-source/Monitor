@@ -1,0 +1,12 @@
+[Unit]
+Description=MONITOR weekly OSRM OSM graph update
+
+[Timer]
+# Host timezone should be Europe/Moscow (see SERVER.md).
+OnCalendar=Sun *-*-* 07:00:00
+Persistent=true
+AccuracySec=1min
+Unit=monitor-osrm-update.service
+
+[Install]
+WantedBy=timers.target

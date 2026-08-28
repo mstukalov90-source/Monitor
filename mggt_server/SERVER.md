@@ -51,7 +51,7 @@ df -h /
 | На `.219` | TLS/`443` нет; HTTP `:80` |
 
 **Android:** VPN-приложение → LAN, доступ к `:80` / `:8000` / `:5432`.  
-WebCRM в интернет **не** публикуется — только корпсеть / VPN.
+WebCRM и OSRM в интернет **не** публикуются — только корпсеть / VPN.
 
 ---
 
@@ -60,8 +60,11 @@ WebCRM в интернет **не** публикуется — только ко
 | Порт | Процесс | Назначение |
 |------|---------|------------|
 | `22` | `sshd` | SSH |
-| `80` | `nginx` | SPA + proxy M2M → `:8000`, WebCRM `/api/` → `:8080` |
+| `80` | `nginx` | SPA + proxy M2M → `:8000`, WebCRM `/api/` → `:8080`, OSRM `/osrm/` → `:5000–5002` |
 | `8080` | `uvicorn` | WebCRM API, **только** `127.0.0.1` |
+| `5000` | `monitor-osrm-car` | OSRM driving, **только** `127.0.0.1` |
+| `5001` | `monitor-osrm-bicycle` | OSRM bike, **только** `127.0.0.1` |
+| `5002` | `monitor-osrm-foot` | OSRM foot, **только** `127.0.0.1` |
 | `5432` | `monitor-db` | Docker PostGIS (корпсеть) |
 | `8000` | `monitor-api` | Docker M2M |
 | `443` | — | нет (TLS на шлюзе) |
@@ -75,6 +78,7 @@ WebCRM в интернет **не** публикуется — только ко
 |------|-----------|----------|
 | `nginx.service` | active | HTTP reverse proxy + статика |
 | `monitor-webcrm.service` | active | FastAPI WebCRM (`uvicorn app.main:app`) |
+| `monitor-osrm-update.timer` | (после деплоя) | вс 07:00 — обновление графа OSRM |
 | `docker.service` | active | контейнеры MONITOR |
 | `firewalld.service` | active | фильтр пакетов |
 
@@ -87,6 +91,7 @@ WebCRM в интернет **не** публикуется — только ко
 
 ```bash
 systemctl status nginx monitor-webcrm docker firewalld
+systemctl list-timers monitor-osrm-update.timer
 ```
 
 ---
@@ -101,6 +106,7 @@ systemctl status nginx monitor-webcrm docker firewalld
 | `server_name` | `172.21.198.219 monitor-crm.mggt.ru` |
 | root | `/var/www/monitor-webcrm` |
 | `= /health`, `/api/photos/meta/`, `/api/uuids/`, `/api/mggtfield/`, `/api/qgis/` | `proxy_pass http://127.0.0.1:8000` (M2M, без geo) |
+| `/osrm/` | OSRM; **только** `$is_internal`; `driving`/`car` → `:5000`, `bike`/`bicycle`/`cycling` → `:5001`, `foot`/`walking` → `:5002` |
 | `/api/` (остальное), `/` (SPA) | WebCRM / SPA; **только** `$is_internal` (`127.0.0.0/8`, `172.21.0.0/16`), иначе `403` |
 
 Отчёты: [STAGE3_REPORT.md](STAGE3_REPORT.md), [STAGE4_REPORT.md](STAGE4_REPORT.md).
@@ -114,11 +120,15 @@ systemctl status nginx monitor-webcrm docker firewalld
 | `monitor-db` | `postgis/postgis:16-3.4` | `5432` | **Up** (healthy) |
 | `monitor-api` | `monitor-api` (uvicorn M2M) | `8000` | **Up** |
 | `monitor-collector` | `monitor-collector` (APScheduler) | — | **Up** |
+| `monitor-osrm-car` | `osrm-backend` (MLD, car.lua) | `127.0.0.1:5000` | compose profile `osrm` |
+| `monitor-osrm-bicycle` | `osrm-backend` (MLD, bicycle.lua) | `127.0.0.1:5001` | compose profile `osrm` |
+| `monitor-osrm-foot` | `osrm-backend` (MLD, foot.lua) | `127.0.0.1:5002` | compose profile `osrm` |
 
 | Том | Назначение |
 |-----|------------|
 | `monitor_pgdata` | данные PostgreSQL/PostGIS — **сохранён** |
 | `/mnt/monitor/ogh-zakazy` → collector | CIFS Заказы **ro** (`bind-propagation: rslave`) |
+| `/opt/monitor/osrm-data` | PBF Москвы + графы OSRM (`current` / `previous` / `builds`) |
 
 ```bash
 cd /opt/monitor && docker compose ps -a
@@ -126,9 +136,25 @@ docker volume ls | grep monitor
 ```
 
 Файл окружения стека: `/opt/monitor/.env`  
-Важные переменные (без секретов): `POSTGRES_*`, `REMOTE_DB_HOST=172.16.206.170`, `WEB_GEO_DB_HOST=172.21.198.149`, `MONITOR_API_PUBLIC_BASE_URL`, `MONITOR_API_PORT=8000`.
+Важные переменные (без секретов): `POSTGRES_*`, `REMOTE_DB_HOST=172.16.206.170`, `WEB_GEO_DB_HOST=172.21.198.149`, `MONITOR_API_PUBLIC_BASE_URL`, `MONITOR_API_PORT=8000`, `OSRM_IMAGE`, `OSRM_*_PORT`.
 
 На 28.07 после этапа 1: `MONITOR_API_PUBLIC_BASE_URL=https://monitor-crm.mggt.ru`. WebCRM: `DB_HOST=127.0.0.1`, `PHOTO_SFTP_ENABLED=false`.
+
+---
+
+## OSRM (маршруты Москва)
+
+Три контейнера (профиль compose `osrm`), карта города, ODbL OSM. Доступ только корпсеть / VPN через nginx `/osrm/` (`$is_internal`). Шлюзу и интернету не отдаём.
+
+| Профиль | Контейнер | localhost | URL |
+|---------|-----------|-----------|-----|
+| авто | `monitor-osrm-car` | `:5000` | `/osrm/route/v1/driving/{lon},{lat};{lon},{lat}` |
+| вело | `monitor-osrm-bicycle` | `:5001` | `/osrm/route/v1/bike/...` |
+| пеший | `monitor-osrm-foot` | `:5002` | `/osrm/route/v1/foot/...` |
+
+Алиасы: `car`→driving, `bicycle`/`cycling`→bike, `walking`→foot. Координаты **lon,lat**.
+
+Данные: `/opt/monitor/osrm-data/` (`pbf/`, `builds/<stamp>/`, symlink `current` и `previous`). Первый сбор и еженедельное обновление: `scripts/osrm_update.sh`. Откат: `scripts/osrm_rollback.sh`. Timer: [`systemd/monitor-osrm-update.timer`](systemd/monitor-osrm-update.timer) (вс 07:00). Деплой: [`../DEPLOY.md`](../DEPLOY.md).
 
 ---
 
@@ -196,6 +222,7 @@ firewall-cmd --list-rich-rules
 | `/opt/monitor/photo_to_upload/` | очередь upload в MSI |
 | `/mnt/monitor/situation` | CIFS **read-only**: `\\len-fs02\bfiles$\situation` |
 | `/mnt/monitor/ogh-zakazy` | CIFS **read-only**: `\\mggt\work\Common\ОГХ\Заказы` |
+| `/opt/monitor/osrm-data/` | PBF Москвы и графы OSRM (не в git) |
 | Docker volume `monitor_pgdata` | БД `monitor` |
 
 ---
