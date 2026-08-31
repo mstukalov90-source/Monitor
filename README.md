@@ -12,6 +12,7 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 | 03:00 | `data_mos` | Vse 8 ezhednevnykh eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
 | 06:00 | `vector_stroy_url_222` | Chitaet token iz `Vector_py/token.md`, skachivaet GeoJSON map221/rs_2022 s vector.mka.mos.ru, DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; pri otsutstvii tokena ili oshibke API — propusk |
+| 18:30 | `genplan_confirm` | UUID foto iz CRM-snimkov (`tasks_field` / `tasks_delay` / `tasks_done_*` → confirm true; `tasks_clear` → false) → MSI `PATCH /api/photos/{uuid}/confirm`. Bez `cam_id` — skip. False ne shlyotsya, esli tot zhe `cam_id` uzhe v true-snimkakh. |
 | 22:00 | `ogh_disruption_topotext` | Read-only `topopassport.topotext` iz `mggt_asu` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` |
 | 22:15 | `ogh_disruption_topo_texts` | Read-only `t500.topo_texts` iz `mggt` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` pri `filter_pass=topo_texts` |
 | 22:25 | `ogh_disruption_crm_tasks` | Novye stroki `odh_export."ogh-disruption"` → `crm.tasks` (tip «Разрытия», `ogh_id` = `id`). Tolko otsutstvuyushchie `ogh_id` (`NOT EXISTS`) |
@@ -191,6 +192,7 @@ docker compose exec collector python -m collector.scheduler --run genplan_fetch_
 docker compose exec collector python -m collector.scheduler --run genplan_fetch_uuid_api
 docker compose exec collector python -m collector.scheduler --run genplan_uuid_api_pipeline
 docker compose exec collector python -m collector.scheduler --run genplan_download
+docker compose exec collector python -m collector.scheduler --run genplan_confirm
 docker compose exec collector python -m collector.scheduler --run backfill_ai_photo_tasks
 docker compose exec collector python -m collector.scheduler --run genplan
 docker compose exec collector python -m collector.scheduler --run ogh_disruption
@@ -417,6 +419,31 @@ GENPLAN_FETCH_UUID_API_LIMIT=0   # 0 = bez limita; napr. 20 dlya smoke-testa
 
 Otlichie ot `genplan_fetch_uploaded`: istochnik UUID — `uuid_api` (push ot kolleg), a ne `uploaded_photo` (nash upload).
 
+### Confirm razrytiya v genplan (`genplan_confirm`)
+
+Ezhednevnyy cron **18:30** Europe/Moscow. Po `photo_uuid` iz CRM-snimkov:
+
+- `true` — zadacha v `crm.tasks_field` / `tasks_delay` / `tasks_done_legal` / `tasks_done_illegal`
+- `false` — zadacha v `crm.tasks_clear`, esli tot zhe `cam_id` **ne** vstrechaetsya v true-snimkakh
+
+Bez `cam_id` v `genplan.photo_meta` zapis propuskaetsya. Uspekh pishetsya v `genplan.photo_confirm_log` (povtor s tem zhe confirm ne shlyotsya).
+
+```bash
+# Smoke: 10 true + 10 false
+docker compose exec -e GENPLAN_CONFIRM_LIMIT_TRUE=10 -e GENPLAN_CONFIRM_LIMIT_FALSE=10 \
+  collector python -m collector.scheduler --run genplan_confirm
+
+# Polnyy progon (kak v 18:30)
+docker compose exec collector python -m collector.scheduler --run genplan_confirm
+```
+
+```
+GENPLAN_CONFIRM_LIMIT_TRUE=0    # 0 = bez limita
+GENPLAN_CONFIRM_LIMIT_FALSE=0
+```
+
+### Skachivanie fotografiy (`downloaded_photo/`)
+
 Proverka:
 
 ```sql
@@ -579,7 +606,8 @@ SELECT job_name, status, message, started_at
 FROM collector.job_runs
 WHERE job_name IN (
   'genplan_upload', 'genplan_fetch_uploaded', 'genplan_fetch_uuid_api',
-  'genplan_uuid_api_pipeline', 'genplan_download', 'backfill_ai_photo_tasks',
+  'genplan_uuid_api_pipeline', 'genplan_download', 'genplan_confirm',
+  'backfill_ai_photo_tasks',
   'genplan_fetch', 'genplan'
 )
 ORDER BY started_at DESC

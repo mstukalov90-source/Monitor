@@ -69,6 +69,9 @@ GENPLAN_FETCH_META_LIMIT = int(os.getenv("GENPLAN_FETCH_META_LIMIT", "0"))
 GENPLAN_FETCH_UPLOADED_LIMIT = int(os.getenv("GENPLAN_FETCH_UPLOADED_LIMIT", "0"))
 # 0 = no limit; set e.g. 20 for local smoke tests
 GENPLAN_FETCH_UUID_API_LIMIT = int(os.getenv("GENPLAN_FETCH_UUID_API_LIMIT", "0"))
+# 0 = no limit; smoke: GENPLAN_CONFIRM_LIMIT_TRUE=10 GENPLAN_CONFIRM_LIMIT_FALSE=10
+GENPLAN_CONFIRM_LIMIT_TRUE = int(os.getenv("GENPLAN_CONFIRM_LIMIT_TRUE", "0"))
+GENPLAN_CONFIRM_LIMIT_FALSE = int(os.getenv("GENPLAN_CONFIRM_LIMIT_FALSE", "0"))
 GENPLAN_PHOTO_UPLOAD_DIR = PROJECT_DIR / "photo_to_upload"
 GENPLAN_PHOTO_UPLOADED_DIR = PROJECT_DIR / "photo_uploaded"
 GENPLAN_DOWNLOAD_DIR = PROJECT_DIR / "downloaded_photo"
@@ -255,3 +258,4 @@ OGH_DISRUPTION_TOPOTEXT_SQL = (
 OZN_UPLOAD_LOG_SQL = PROJECT_DIR / "sql" / "38_odh_export_ozn_upload_log.sql"
 OGH_ORDER_PHOTO_LOG_SQL = PROJECT_DIR / "sql" / "41_ogh_order_photo_log.sql"
 SITUATION_PHOTO_LOG_SQL = PROJECT_DIR / "sql" / "42_situation_photo_log.sql"
+GENPLAN_PHOTO_CONFIRM_LOG_SQL = PROJECT_DIR / "sql" / "47_genplan_photo_confirm_log.sql"

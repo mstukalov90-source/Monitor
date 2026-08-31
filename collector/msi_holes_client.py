@@ -175,6 +175,17 @@ class MsiHolesClient:
     def delete(self, url: str, **kwargs) -> httpx.Response:
         return self.request("DELETE", url, **kwargs)
 
+    def confirm_photo(self, uuid: str, confirm: bool) -> httpx.Response:
+        """PATCH /api/photos/{uuid}/confirm with {"confirm": true|false}."""
+        cleaned = (uuid or "").strip()
+        if not cleaned:
+            raise ValueError("uuid is required")
+        return self.patch(
+            f"/api/photos/{cleaned}/confirm",
+            json={"confirm": bool(confirm)},
+            headers={"Accept": "application/json"},
+        )
+
     # -- lifecycle ----------------------------------------------------------
     def close(self) -> None:
         self._http.close()

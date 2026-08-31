@@ -40,6 +40,18 @@ Accept: application/json
 `GET api/photos/images/550e8400-e29b-41d4-a716-446655440000`
 Accept: image/jpeg,image/png
 
+## Подтверждение разрытия по фотографии
+Запрос:
+`PATCH api/photos/550e8400-e29b-41d4-a716-446655440000/confirm`
+Content-Type: application/json
+Body:
+```json
+{"confirm": true}
+```
+`true` — разрытие действительно имеется; `false` — разрытие обнаружено ошибочно.
+
+MONITOR отправляет это из cron `genplan_confirm` (18:30 Europe/Moscow) по `photo_uuid` из CRM-снимков задач.
+
 ## Получение данных по ордеру
 Запрос:
 `GET api/orders/<order_id>`

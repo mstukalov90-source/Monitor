@@ -8,6 +8,7 @@ Daily schedule (Europe/Moscow):
   03:30 — crm_task_sync_audit
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
   06:00 — vector_stroy_url_222: fetch map221/rs_2022 + DROP + GeoJSON upsert
+  18:30 — genplan_confirm: CRM snapshot photo_uuid → MSI PATCH /api/photos/{uuid}/confirm
   22:00 — ogh_disruption_topotext: matching topopassport.topotext → odh_export.ogh-disruption
   22:15 — ogh_disruption_topo_texts: matching t500.topo_texts (mggt) → odh_export.ogh-disruption
   22:25 — ogh_disruption_crm_tasks: new odh_export.ogh-disruption rows → crm.tasks
@@ -47,6 +48,7 @@ from collector.jobs import (
     backfill_data_mos_crm_tasks_job,
     crm_task_sync_audit_job,
     data_mos_job,
+    genplan_confirm_job,
     genplan_download_job,
     genplan_fetch_job,
     genplan_fetch_uploaded_job,
@@ -118,6 +120,7 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "genplan": genplan_job.run,
         "genplan_upload": genplan_upload_job.run,
         "genplan_download": genplan_download_job.run,
+        "genplan_confirm": genplan_confirm_job.run,
         "backfill_ai_photo_tasks": backfill_ai_photo_tasks_job.run,
         "backfill_data_mos_crm_tasks": backfill_data_mos_crm_tasks_job.run,
         "crm_task_sync_audit": crm_task_sync_audit_job.run,
@@ -215,6 +218,15 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
+        genplan_confirm_job.run,
+        CronTrigger(hour=18, minute=30, timezone=TZ),
+        id="genplan_confirm",
+        name="CRM snapshot photos → genplan confirm",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
         ogh_disruption_topotext_job.run,
         CronTrigger(hour=22, minute=0, timezone=TZ),
         id="ogh_disruption_topotext",
@@ -278,6 +290,7 @@ def start_scheduler() -> None:
     logger.info("  03:30 — crm_task_sync_audit")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
     logger.info("  06:00 — vector_stroy_url_222")
+    logger.info("  18:30 — genplan_confirm (CRM snapshots → MSI confirm)")
     logger.info("  22:00 — ogh_disruption_topotext (mggt_asu topopassport.topotext)")
     logger.info("  22:15 — ogh_disruption_topo_texts (mggt t500.topo_texts)")
     logger.info("  22:25 — ogh_disruption_crm_tasks (ogh-disruption → crm.tasks)")
@@ -289,6 +302,7 @@ def start_scheduler() -> None:
     logger.info("  (genplan_fetch_uploaded — manual only: --run genplan_fetch_uploaded)")
     logger.info("  (genplan_fetch_uuid_api — manual only: --run genplan_fetch_uuid_api)")
     logger.info("  (genplan_download — manual only: --run genplan_download)")
+    logger.info("  (genplan_confirm — also --run genplan_confirm; cron 18:30)")
     logger.info("  (backfill_ai_photo_tasks — manual only: --run backfill_ai_photo_tasks)")
     logger.info("  (backfill_data_mos_crm_tasks — manual only: --run backfill_data_mos_crm_tasks)")
     logger.info("  (ogh_analiz_sync_orders — manual only: --run ogh_analiz_sync_orders)")
