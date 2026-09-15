@@ -1,8 +1,85 @@
--- Include odh_export."ogh-disruption" in crm.iter_task_geom() so
--- crm.refresh_task_area_keys() can set area_key for OGH disruption tasks.
+-- crm.tasks.source_table: scalar text → text[] (several geometry source tables).
 -- Idempotent. Safe to re-run.
+--
+-- Apply only on SWEB test 77.222.63.161 — do not run on prod 172.21.198.219.
 
 CREATE SCHEMA IF NOT EXISTS crm;
+
+DO $$
+DECLARE
+    v_ndims integer;
+BEGIN
+    IF to_regclass('crm.tasks') IS NULL THEN
+        RAISE NOTICE 'crm.tasks missing, skip source_table array migration';
+        RETURN;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'crm'
+          AND table_name = 'tasks'
+          AND column_name = 'source_table'
+    ) THEN
+        RAISE NOTICE 'crm.tasks.source_table missing, skip';
+        RETURN;
+    END IF;
+
+    SELECT a.attndims
+    INTO v_ndims
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'crm'
+      AND c.relname = 'tasks'
+      AND a.attname = 'source_table'
+      AND a.attnum > 0
+      AND NOT a.attisdropped;
+
+    IF v_ndims IS NULL THEN
+        RAISE NOTICE 'crm.tasks.source_table attr missing, skip';
+        RETURN;
+    END IF;
+
+    IF v_ndims > 0 THEN
+        RAISE NOTICE 'crm.tasks.source_table already array, skip ALTER';
+        RETURN;
+    END IF;
+
+    DROP TRIGGER IF EXISTS trg_crm_tasks_area_key ON crm.tasks;
+
+    ALTER TABLE crm.tasks
+        ALTER COLUMN source_table TYPE text[]
+        USING CASE
+            WHEN source_table IS NULL THEN NULL
+            ELSE ARRAY[source_table]
+        END;
+
+    COMMENT ON COLUMN crm.tasks.source_table IS
+        'Qualified table names of geometry sources for the task (text[]).';
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'crm' AND p.proname = 'trg_tasks_refresh_area_key'
+    ) THEN
+        CREATE TRIGGER trg_crm_tasks_area_key
+            AFTER INSERT OR UPDATE OF
+                source_table,
+                source_row_id,
+                photo_uuid,
+                photo_lens,
+                ogh_id,
+                oati_id,
+                earthwork_id,
+                localwork_id,
+                avr_mos_id
+            ON crm.tasks
+            FOR EACH ROW
+            EXECUTE FUNCTION crm.trg_tasks_refresh_area_key();
+    END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION crm.iter_task_geom()
 RETURNS TABLE(task_key uuid, geom geometry, prio integer)

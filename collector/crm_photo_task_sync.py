@@ -87,7 +87,7 @@ def _reuse_ai_photo_tasks(cur: Any) -> int:
     query = f"""
         UPDATE crm.tasks ct
         SET photo_uuid = src.uuid,
-            source_table = %s,
+            source_table = ARRAY[%s]::text[],
             source_row_id = src.id,
             source_geom_hash = {geom_hash},
             user_last_edit = %s::text[]
@@ -179,7 +179,7 @@ def _anchor_photo_tasks(cur: Any, cfg: PhotoLayerSync) -> int:
     geom_col = f't."{cfg.geom_column}"'
     query = f"""
         UPDATE crm.tasks ct
-        SET source_table = %s,
+        SET source_table = ARRAY[%s]::text[],
             source_row_id = t.id,
             source_geom_hash = {_geom_hash_expr(geom_col)}
         FROM {cfg.source_table} t

@@ -102,7 +102,7 @@ def _link_split_rows(cur: Any, cfg: ServiceTaskSync, layer: SplitLayerSync) -> i
 
     anchor_query = f"""
         UPDATE crm.tasks ct
-        SET source_table = %s,
+        SET source_table = ARRAY[%s]::text[],
             source_row_id = t.id,
             source_global_id = t.global_id,
             source_geom_hash = {_geom_hash_expr("t.geom")}

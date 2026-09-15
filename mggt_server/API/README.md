@@ -32,3 +32,7 @@ curl -sS https://monitor-crm.mggt.ru/health
 | `PUT` | `/api/uuids/{uuid}` | Bearer |
 
 `POST /api/mggtfield/photos` — для Android по VPN на `http://172.21.198.219:8000`, не через публичный домен смежников.
+
+Маршруты OSRM (авто / вело / пеший, Москва) — Android по VPN на `http://172.21.198.219/osrm`, без API-ключа, не через `monitor-crm.mggt.ru`. Документация: [`../../osrm-android-api-doc.md`](../../osrm-android-api-doc.md).
+
+Маршруты обследования заказа (WebCRM JWT, `field_route_service`) — Android по VPN на `http://172.21.198.219`, не OSRM напрямую. Документация для полевого приложения: [`../../docs/field-order-route-android.md`](../../docs/field-order-route-android.md) (пароль только локально / в `credentials.local.md`).

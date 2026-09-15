@@ -119,7 +119,7 @@ BEGIN
         SELECT ct.key, pm.geom, 0
         FROM crm.tasks ct
         JOIN genplan.photo_meta pm ON pm.id = ct.source_row_id
-        WHERE ct.source_table = 'genplan.photo_meta'
+        WHERE 'genplan.photo_meta' = ANY(ct.source_table)
           AND ct.source_row_id IS NOT NULL
           AND pm.geom IS NOT NULL
           AND NOT ST_IsEmpty(pm.geom);
@@ -141,7 +141,7 @@ BEGIN
         SELECT ct.key, lr.geom, 0
         FROM crm.tasks ct
         JOIN lens.reports lr ON lr.id = ct.source_row_id
-        WHERE ct.source_table = 'lens.reports'
+        WHERE 'lens.reports' = ANY(ct.source_table)
           AND ct.source_row_id IS NOT NULL
           AND lr.geom IS NOT NULL
           AND NOT ST_IsEmpty(lr.geom);

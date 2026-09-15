@@ -48,6 +48,7 @@ services:
       - ./sql/45_crm_iter_task_geom_ogh_disruption.sql:/docker-entrypoint-initdb.d/23-crm-iter-task-geom-ogh-disruption.sql:ro
       - ./sql/46_crm_tasks_status.sql:/docker-entrypoint-initdb.d/24-crm-tasks-status.sql:ro
       - ./sql/47_genplan_photo_confirm_log.sql:/docker-entrypoint-initdb.d/25-genplan-photo-confirm-log.sql:ro
+      - ./sql/48_crm_tasks_source_table_array.sql:/docker-entrypoint-initdb.d/26-crm-tasks-source-table-array.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitor} -d ${POSTGRES_DB:-monitor}"]
       interval: 5s

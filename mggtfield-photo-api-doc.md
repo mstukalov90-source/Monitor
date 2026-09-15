@@ -2,7 +2,7 @@
 
 API принимает **бинарные файлы** JPEG/PNG с мобильного приложения и сохраняет их на сервере в каталог `/opt/monitor/mggtfield_photo/`.
 
-Для передачи **метаданных** (координаты, uuid и т.д.) используется отдельный endpoint — см. [`genplan api/monitor-api-doc.md`](genplan%20api/monitor-api-doc.md).
+Для передачи **метаданных** (координаты, uuid и т.д.) используется отдельный endpoint — см. [`genplan api/monitor-api-doc.md`](genplan%20api/monitor-api-doc.md). Маршруты по Москве (OSRM): [`osrm-android-api-doc.md`](osrm-android-api-doc.md).
 
 ## Подключение
 

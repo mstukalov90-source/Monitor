@@ -45,6 +45,7 @@ class CrmTaskSyncSqlTests(unittest.TestCase):
         self.assertIn("occupied.task_key = ct.key", link_sql)
         self.assertIn("source_geom_hash", anchor_sql)
         self.assertIn("source_table", anchor_sql)
+        self.assertIn("ARRAY[%s]::text[]", anchor_sql)
 
     def test_sync_runs_for_known_service(self) -> None:
         cur = MagicMock()

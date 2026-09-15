@@ -47,6 +47,7 @@ class CrmPhotoTaskSyncSqlTests(unittest.TestCase):
         self.assertIn("'etl' = ANY(ct2.user_last_edit)", sql)
         self.assertIn("ORDER BY ct2.key DESC", sql)
         self.assertIn("ct.photo_uuid IS DISTINCT FROM src.uuid", sql)
+        self.assertIn("ARRAY[%s]::text[]", sql)
         self.assertEqual(cur.execute.call_args[0][1][0], "genplan.photo_meta")
 
     def test_lens_insert_has_not_exists_and_external_report_id(self) -> None:
@@ -70,6 +71,7 @@ class CrmPhotoTaskSyncSqlTests(unittest.TestCase):
         self.assertEqual(anchored, 3)
         sql = cur.execute.call_args[0][0]
         self.assertIn("source_table", sql)
+        self.assertIn("ARRAY[%s]::text[]", sql)
         self.assertIn("source_row_id", sql)
         self.assertIn("source_geom_hash", sql)
         self.assertEqual(cur.execute.call_args[0][1], ["lens.reports"])

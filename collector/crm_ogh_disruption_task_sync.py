@@ -86,7 +86,7 @@ def _anchor_ogh_disruption_tasks(cur: Any) -> int:
     geom_col = f't."{GEOM_COLUMN}"'
     query = f"""
         UPDATE crm.tasks ct
-        SET source_table = %s,
+        SET source_table = ARRAY[%s]::text[],
             source_row_id = t.id,
             source_geom_hash = {_geom_hash_expr(geom_col)}
         FROM {SOURCE_TABLE_SQL} t

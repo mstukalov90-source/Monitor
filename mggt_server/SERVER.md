@@ -154,6 +154,8 @@ docker volume ls | grep monitor
 
 Алиасы: `car`→driving, `bicycle`/`cycling`→bike, `walking`→foot. Координаты **lon,lat**.
 
+Для Android: [`../osrm-android-api-doc.md`](../osrm-android-api-doc.md).
+
 Данные: `/opt/monitor/osrm-data/` (`pbf/`, `builds/<stamp>/`, symlink `current` и `previous`). Первый сбор и еженедельное обновление: `scripts/osrm_update.sh`. Откат: `scripts/osrm_rollback.sh`. Timer: [`systemd/monitor-osrm-update.timer`](systemd/monitor-osrm-update.timer) (вс 07:00). Деплой: [`../DEPLOY.md`](../DEPLOY.md).
 
 ---

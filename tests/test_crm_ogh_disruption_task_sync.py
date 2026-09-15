@@ -40,6 +40,7 @@ class CrmOghDisruptionTaskSyncSqlTests(unittest.TestCase):
         self.assertEqual(anchored, 4)
         sql = cur.execute.call_args[0][0]
         self.assertIn("source_table", sql)
+        self.assertIn("ARRAY[%s]::text[]", sql)
         self.assertIn("source_row_id", sql)
         self.assertIn("source_geom_hash", sql)
         self.assertIn(SOURCE_TABLE_SQL, sql)
