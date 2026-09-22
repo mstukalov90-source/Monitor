@@ -11,7 +11,7 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 | 02:00 | `ogh_analiz_sync` | Read-only `gis.ogh_analiz` iz `mggt_asu` → `odh_export.ogh_analiz` (MSK-77 SRID 980077 → WGS-84), insert/update po `id`, udalenie ischeznuvshikh |
 | 03:00 | `data_mos` | Vse 8 ezhednevnykh eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
-| 06:00 | `vector_stroy_url_222` | Chitaet token iz `Vector_py/token.md`, skachivaet GeoJSON map221/rs_2022 s vector.mka.mos.ru, DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; pri otsutstvii tokena ili oshibke API — propusk |
+| 06:00 | `vector_stroy_url_222` | ORBISmap REST API `vector.mggt.ru` (`POST /login/` po `VECTOR_API_USERNAME/PASSWORD`, zatem `GET map221/layers/rs_2022/export/` geojson 4326), DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; bez kredov ili pri oshibke API — propusk |
 | 18:30 | `genplan_confirm` | UUID foto iz CRM-snimkov (`tasks_field` / `tasks_delay` / `tasks_done_*` → confirm true; `tasks_clear` → false) → MSI `PATCH /api/photos/{uuid}/confirm`. Bez `cam_id` — skip. False ne shlyotsya, esli tot zhe `cam_id` uzhe v true-snimkakh. |
 | 22:00 | `ogh_disruption_topotext` | Read-only `topopassport.topotext` iz `mggt_asu` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` |
 | 22:15 | `ogh_disruption_topo_texts` | Read-only `t500.topo_texts` iz `mggt` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` pri `filter_pass=topo_texts` |
@@ -216,6 +216,22 @@ Password: monitor
 ```
 
 Skhemy: `data_mos`, `lens`, `stroymonitoring`, `genplan`, `odh_export`, `collector` (logi zapuskov).
+
+### Vector stroy (ORBISmap REST API)
+
+Istochnik: `https://vector.mggt.ru/api/2.8/mggt` (ORBISmap REST API v2.8). Kazhdyy zapusk: `POST /login/` (form `login`/`password`) → token → `GET /map221/layers/rs_2022/export/?format=geojson&geomSR=4326&token=...` → `url_222_wgs.geojson` → `vector_stroy.url_222`. Otvet ~55 MB (14.5 tys. ob"ektov), geometriya uzhe v WGS-84.
+
+```bash
+# V .env:
+# VECTOR_API_USERNAME=...
+# VECTOR_API_PASSWORD=...
+# (opcionalno: VECTOR_API_MAP_CODE, VECTOR_API_LAYER_CODE, VECTOR_API_GEOM_SR,
+#  VECTOR_API_VERIFY_SSL, VECTOR_API_TIMEOUT)
+
+docker compose exec collector python -m collector.scheduler --run vector_stroy_url_222
+```
+
+Bez `VECTOR_API_USERNAME`/`VECTOR_API_PASSWORD` — propusk (kak ran'she bez tokena).
 
 ### Stroymonitoring (web_geo)
 

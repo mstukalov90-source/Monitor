@@ -8,7 +8,17 @@ from dataclasses import dataclass
 
 import geopandas as gpd
 
-from collector.config import PROJECT_DIR
+from collector.config import (
+    PROJECT_DIR,
+    VECTOR_API_BASE_URL,
+    VECTOR_API_GEOM_SR,
+    VECTOR_API_LAYER_CODE,
+    VECTOR_API_MAP_CODE,
+    VECTOR_API_PASSWORD,
+    VECTOR_API_TIMEOUT,
+    VECTOR_API_USERNAME,
+    VECTOR_API_VERIFY_SSL,
+)
 from collector.data_mos_schema import (
     collect_schema,
     ensure_base_table,
@@ -17,7 +27,7 @@ from collector.data_mos_schema import (
     prepare_value,
 )
 from collector.db import local_connection, log_job_run
-from collector.vector_mka_fetch import fetch_url_221_geojson, read_token
+from collector.vector_api_client import OrbisMapClient
 
 logger = logging.getLogger(__name__)
 
@@ -141,22 +151,38 @@ def load_geojson_to_db() -> LoadResult:
 
 
 def _fetch_geojson_to_disk() -> bool:
-    """Return True if file written, False if skipped (no token / fetch error)."""
-    token = read_token()
-    if not token:
-        logger.warning("No vector.mka token — skipping fetch")
+    """Return True if file written, False if skipped (no credentials / error)."""
+    if not VECTOR_API_USERNAME or not VECTOR_API_PASSWORD:
+        logger.warning(
+            "No VECTOR_API_USERNAME/VECTOR_API_PASSWORD — skipping fetch"
+        )
         return False
 
     try:
-        data = fetch_url_221_geojson(token)
+        client = OrbisMapClient(
+            base_url=VECTOR_API_BASE_URL,
+            username=VECTOR_API_USERNAME,
+            password=VECTOR_API_PASSWORD,
+            verify=VECTOR_API_VERIFY_SSL,
+            timeout=VECTOR_API_TIMEOUT,
+        )
+        data = client.fetch_layer_geojson(
+            VECTOR_API_MAP_CODE,
+            VECTOR_API_LAYER_CODE,
+            geom_sr=VECTOR_API_GEOM_SR,
+        )
         SOURCE_GEOJSON.write_text(
             json.dumps(data, ensure_ascii=False),
             encoding="utf-8",
         )
-        logger.info("Fetched %s from vector.mka", SOURCE_GEOJSON.name)
+        logger.info(
+            "Fetched %s features into %s from ORBISmap API",
+            len(data.get("features", [])),
+            SOURCE_GEOJSON.name,
+        )
         return True
     except Exception:
-        logger.exception("vector.mka fetch failed — skipping")
+        logger.exception("ORBISmap API fetch failed — skipping")
         return False
 
 
@@ -167,7 +193,8 @@ def run() -> None:
             conn,
             JOB_NAME,
             "running",
-            f"Source: vector.mka map221/rs_2022 → {SOURCE_GEOJSON.name}",
+            f"Source: ORBISmap API {VECTOR_API_MAP_CODE}/{VECTOR_API_LAYER_CODE} "
+            f"→ {SOURCE_GEOJSON.name}",
         )
 
     _fetch_geojson_to_disk()

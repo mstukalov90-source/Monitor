@@ -58,8 +58,16 @@ def _env_bool(name: str, *, default: bool = True) -> bool:
 
 
 MSI_HOLES_VERIFY_SSL = _env_bool("MSI_HOLES_VERIFY_SSL", default=True)
-VECTOR_MKA_TOKEN_FILE = PROJECT_DIR / "Vector_py" / "token.md"
-VECTOR_MKA_VERIFY_SSL = _env_bool("VECTOR_MKA_VERIFY_SSL", default=False)
+VECTOR_API_BASE_URL = os.getenv(
+    "VECTOR_API_BASE_URL", "https://vector.mggt.ru/api/2.8/mggt"
+)
+VECTOR_API_USERNAME = os.getenv("VECTOR_API_USERNAME", "")
+VECTOR_API_PASSWORD = os.getenv("VECTOR_API_PASSWORD", "")
+VECTOR_API_MAP_CODE = os.getenv("VECTOR_API_MAP_CODE", "map221")
+VECTOR_API_LAYER_CODE = os.getenv("VECTOR_API_LAYER_CODE", "rs_2022")
+VECTOR_API_GEOM_SR = int(os.getenv("VECTOR_API_GEOM_SR", "4326"))
+VECTOR_API_VERIFY_SSL = _env_bool("VECTOR_API_VERIFY_SSL", default=True)
+VECTOR_API_TIMEOUT = int(os.getenv("VECTOR_API_TIMEOUT", "600"))
 GENPLAN_SEARCH_LAT = float(os.getenv("GENPLAN_SEARCH_LAT", "55.7558"))
 GENPLAN_SEARCH_LNG = float(os.getenv("GENPLAN_SEARCH_LNG", "37.6173"))
 GENPLAN_SEARCH_RADIUS_M = int(os.getenv("GENPLAN_SEARCH_RADIUS_M", "1000"))

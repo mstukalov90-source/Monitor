@@ -391,7 +391,7 @@ curl -sS -w "\nHTTP %{http_code}\n" -X POST \
 | 04:00 | `lens_pipeline` | `lens_sync` + `stroymonitoring_sync` |
 | 06:00 | `vector_stroy_url_222` | fetch map221/rs_2022 → `vector_stroy.url_222` |
 
-Токен vector.mka.mos.ru: `Vector_py/token.md` на сервере или `VECTOR_MKA_TOKEN`. Если сервер не видит vector.mka — fetch локально, затем scp `url_222_wgs.geojson` на `172.21.198.219`.
+Вектор ГИС (ORBISmap REST API): в `.env` задать `VECTOR_API_USERNAME` / `VECTOR_API_PASSWORD` (логин `POST /api/2.8/mggt/login/`, сессия 10 мин). Если сервер не видит `vector.mggt.ru` — fetch локально, затем scp `url_222_wgs.geojson` на `172.21.198.219`.
 
 `genplan_pipeline` — **только ручной** запуск:
 

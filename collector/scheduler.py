@@ -214,7 +214,7 @@ def start_scheduler() -> None:
         vector_stroy_job.run,
         CronTrigger(hour=6, minute=0, timezone=TZ),
         id="vector_stroy_url_222",
-        name="Vector stroy url_222 fetch + DROP + GeoJSON upsert",
+        name="Vector stroy url_222 ORBISmap API fetch + DROP + upsert",
         replace_existing=True,
     )
     scheduler.add_job(
