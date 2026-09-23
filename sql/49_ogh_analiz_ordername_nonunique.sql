@@ -5,7 +5,7 @@
 -- only need a plain index.
 -- Idempotent. Safe to re-run.
 
-DROP INDEX IF EXISTS ux_ogh_analiz_ordername;
+DROP INDEX IF EXISTS odh_export.ux_ogh_analiz_ordername;
 
 CREATE INDEX IF NOT EXISTS ix_ogh_analiz_ordername
     ON odh_export.ogh_analiz ("OrderName");

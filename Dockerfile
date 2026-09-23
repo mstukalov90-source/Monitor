@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-        -o /etc/apt/trusted.gpg.d/postgresql.gpg \
+        -o /etc/apt/trusted.gpg.d/postgresql.asc \
     && echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
         > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 \
