@@ -13,8 +13,6 @@ load_dotenv()
 
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/app"))
 
-OGH_DISRUPTION_GEOJSON = PROJECT_DIR / "mggt_dgn" / "mggt_dgn.geojson"
-
 GENPLAN_API_DIR = PROJECT_DIR / "genplan api"
 GENPLAN_JSON_DIR = PROJECT_DIR / "jsons_genplan"
 GENPLAN_SAMPLE_FILES = frozenset({
@@ -77,6 +75,11 @@ GENPLAN_FETCH_META_LIMIT = int(os.getenv("GENPLAN_FETCH_META_LIMIT", "0"))
 GENPLAN_FETCH_UPLOADED_LIMIT = int(os.getenv("GENPLAN_FETCH_UPLOADED_LIMIT", "0"))
 # 0 = no limit; set e.g. 20 for local smoke tests
 GENPLAN_FETCH_UUID_API_LIMIT = int(os.getenv("GENPLAN_FETCH_UUID_API_LIMIT", "0"))
+# 0 = retry forever; otherwise uuid_api rows older than N days stop being
+# retried (meta 404 is permanent for them)
+GENPLAN_FETCH_UUID_API_PENDING_MAX_DAYS = int(
+    os.getenv("GENPLAN_FETCH_UUID_API_PENDING_MAX_DAYS", "14")
+)
 # 0 = no limit; smoke: GENPLAN_CONFIRM_LIMIT_TRUE=10 GENPLAN_CONFIRM_LIMIT_FALSE=10
 GENPLAN_CONFIRM_LIMIT_TRUE = int(os.getenv("GENPLAN_CONFIRM_LIMIT_TRUE", "0"))
 GENPLAN_CONFIRM_LIMIT_FALSE = int(os.getenv("GENPLAN_CONFIRM_LIMIT_FALSE", "0"))
@@ -181,6 +184,13 @@ OGH_ANALIZ_LOCAL_TABLE = "ogh_analiz"
 OGH_ANALIZ_SOURCE_SRID = 980077
 
 TZ = os.getenv("TZ", "Europe/Moscow")
+
+# DB backups (db_backup job): pg_dump -Fc into BACKUP_DIR (bind-mounted to
+# /opt/monitor/backups). Daily keeps 1 day; Friday runs add a weekly dump
+# kept for 7 days.
+BACKUP_DIR = PROJECT_DIR / "backups"
+DB_BACKUP_DAILY_KEEP_DAYS = float(os.getenv("DB_BACKUP_DAILY_KEEP_DAYS", "1"))
+DB_BACKUP_WEEKLY_KEEP_DAYS = float(os.getenv("DB_BACKUP_WEEKLY_KEEP_DAYS", "7"))
 
 PurgeRuleKind = Literal["date_on_or_before_month_ago", "year_before_current"]
 
