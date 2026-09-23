@@ -27,72 +27,8 @@ from collector.db import (
 logger = logging.getLogger(__name__)
 
 JOB_NAME = "ogh_analiz_sync"
-JOB_NAME_ORDERS = "ogh_analiz_sync_orders"
 FETCH_SIZE = 250
 SOURCE_SRID = OGH_ANALIZ_SOURCE_SRID
-
-# One-shot filter for --run ogh_analiz_sync_orders (column "OrderName").
-# Values look like 12/ОГХ-26/...; in gis.ogh_analiz they live in "OrderName",
-# while "order" holds a different identifier.
-ONCE_ORDERS: tuple[str, ...] = (
-    "12/ОГХ-26/48530",
-    "12/ОГХ-26/60947",
-    "12/ОГХ-26/68405",
-    "12/ОГХ-26/49936",
-    "12/ОГХ-26/49950",
-    "12/ОГХ-26/49943",
-    "12/ОГХ-26/66040",
-    "12/ОГХ-26/66021",
-    "12/ОГХ-26/50056",
-    "12/ОГХ-26/50031",
-    "12/ОГХ-26/66052",
-    "12/ОГХ-26/49970",
-    "12/ОГХ-26/49716",
-    "12/ОГХ-26/49754",
-    "12/ОГХ-26/49436",
-    "12/ОГХ-26/49516",
-    "12/ОГХ-26/68753",
-    "12/ОГХ-26/49678",
-    "12/ОГХ-26/49526",
-    "12/ОГХ-26/07078",
-    "12/ОГХ-26/50472",
-    "12/ОГХ-26/66302",
-    "12/ОГХ-26/59525",
-    "12/ОГХ-26/59524",
-    "12/ОГХ-26/59517",
-    "12/ОГХ-26/59504",
-    "12/ОГХ-26/59508",
-    "12/ОГХ-26/65067",
-    "12/ОГХ-26/65074",
-    "12/ОГХ-26/65072",
-    "12/ОГХ-26/65064",
-    "12/ОГХ-26/65073",
-    "12/ОГХ-26/57944",
-    "12/ОГХ-26/57936",
-    "12/ОГХ-26/66273",
-    "12/ОГХ-26/48518",
-    "12/ОГХ-26/48655",
-    "12/ОГХ-26/47172",
-    "12/ОГХ-26/46593",
-    "12/ОГХ-26/45988",
-    "12/ОГХ-26/46158",
-    "12/ОГХ-26/47094",
-    "12/ОГХ-26/46923",
-    "12/ОГХ-26/46891",
-    "12/ОГХ-26/48282",
-    "12/ОГХ-26/50137",
-    "12/ОГХ-26/50140",
-    "12/ОГХ-26/50142",
-    "12/ОГХ-26/69469",
-    "12/ОГХ-26/46812/1",
-    "12/ОГХ-26/76936",
-    "12/ОГХ-26/76953",
-    "12/ОГХ-26/49147",
-    "12/ОГХ-26/77017",
-    "12/ОГХ-26/51886/1",
-    "12/ОГХ-26/77420",
-    "12/ОГХ-26/78783",
-)
 
 ATTR_COLUMNS: tuple[str, ...] = (
     "id",
@@ -350,48 +286,3 @@ def run() -> None:
             log_job_run(conn, JOB_NAME, "failed", str(exc), run_id=run_id)
         raise
 
-
-def run_orders_once() -> None:
-    """Manual one-shot: insert/update rows whose \"OrderName\" is in ONCE_ORDERS. No DELETE."""
-    run_id = None
-    qualified = f"{OGH_ANALIZ_LOCAL_SCHEMA}.{OGH_ANALIZ_LOCAL_TABLE}"
-    with local_connection() as conn:
-        run_id = log_job_run(
-            conn,
-            JOB_NAME_ORDERS,
-            "running",
-            f"Read-only OrderName filter ({len(ONCE_ORDERS)} values) "
-            f"{OGH_ANALIZ_REMOTE_SCHEMA}.{OGH_ANALIZ_REMOTE_TABLE} → {qualified}",
-        )
-
-    try:
-        result = sync_ogh_analiz(orders=ONCE_ORDERS, delete_missing=False)
-        missing = ", ".join(result.missing_orders) if result.missing_orders else "none"
-        message = (
-            f"Synced {qualified} by OrderName: requested={len(ONCE_ORDERS)}, "
-            f"source={result.source_rows}, inserted={result.inserted}, "
-            f"updated={result.updated}, deleted={result.deleted}, "
-            f"unchanged={result.unchanged}, missing={missing}"
-        )
-        with local_connection() as conn:
-            log_job_run(
-                conn,
-                JOB_NAME_ORDERS,
-                "success",
-                message,
-                rows_affected=result.source_rows,
-                run_id=run_id,
-            )
-        logger.info("%s finished: %s", JOB_NAME_ORDERS, message)
-        if result.missing_orders:
-            logger.warning(
-                "%s: %s order(s) not found: %s",
-                JOB_NAME_ORDERS,
-                len(result.missing_orders),
-                ", ".join(result.missing_orders),
-            )
-    except Exception as exc:
-        logger.exception("%s failed", JOB_NAME_ORDERS)
-        with local_connection() as conn:
-            log_job_run(conn, JOB_NAME_ORDERS, "failed", str(exc), run_id=run_id)
-        raise

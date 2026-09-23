@@ -4,10 +4,11 @@ Scheduler for MONITOR data collector.
 Daily schedule (Europe/Moscow):
   00:01 — genplan_uuid_api_pipeline: uuid_api meta → crm.tasks → download
   02:00 — ogh_analiz_sync: read-only gis.ogh_analiz (mggt_asu) → odh_export.ogh_analiz
-  03:00 — data_mos (all 8 exports sequentially), then ogh_disruption if mggt_dgn.geojson exists
+  03:00 — data_mos (all 8 exports sequentially)
   03:30 — crm_task_sync_audit
   04:00 — lens_pipeline: lens_sync, then stroymonitoring_sync
-  06:00 — vector_stroy_url_222: fetch map221/rs_2022 + DROP + GeoJSON upsert
+  06:00 — vector_stroy_url_222: ORBISmap API map221/rs_2022 + DROP + upsert
+  06:30 — db_backup: pg_dump daily (keep 1 day); Fridays also weekly (keep 7 days)
   18:30 — genplan_confirm: CRM snapshot photo_uuid → MSI PATCH /api/photos/{uuid}/confirm
   22:00 — ogh_disruption_topotext: matching topopassport.topotext → odh_export.ogh-disruption
   22:15 — ogh_disruption_topo_texts: matching t500.topo_texts (mggt) → odh_export.ogh-disruption
@@ -16,14 +17,12 @@ Daily schedule (Europe/Moscow):
 Monthly (Europe/Moscow):
   01:00 first Saturday — data_mos_60562 (export + TRUNCATE load, no purge/split)
 
-  genplan_pipeline (genplan_fetch + import) — manual only: --run genplan_pipeline
   genplan_upload — manual only: --run genplan_upload
   genplan_upload_pipeline — genplan_upload → genplan_fetch_uploaded → genplan (manual)
   genplan_fetch_uuid_api — meta for genplan.uuid_api UUIDs (manual)
   genplan_download — download photos (disruption=true) to downloaded_photo/ (manual)
   backfill_ai_photo_tasks — one-time crm.tasks from genplan.photo_meta (manual)
   backfill_data_mos_crm_tasks — backfill crm.tasks for data_mos split tables (manual)
-  ogh_analiz_sync_orders — one-time ogh_analiz rows by "OrderName" list (manual)
   ozn_excel_inbox — every 15s: Excel from excel_inbox → ogh_analiz.ozn_date/executor
   23:00 — situation_photo_upload: situation share photos → MSI Holes (read-only share)
   situation_photo_upload_dry — same SELECT/path inspect, no API
@@ -48,9 +47,9 @@ from collector.jobs import (
     backfill_data_mos_crm_tasks_job,
     crm_task_sync_audit_job,
     data_mos_job,
+    db_backup_job,
     genplan_confirm_job,
     genplan_download_job,
-    genplan_fetch_job,
     genplan_fetch_uploaded_job,
     genplan_fetch_uuid_api_job,
     genplan_job,
@@ -58,7 +57,6 @@ from collector.jobs import (
     lens_sync_job,
     ogh_analiz_sync_job,
     ogh_disruption_crm_tasks_job,
-    ogh_disruption_job,
     ogh_disruption_topo_texts_job,
     ogh_disruption_topotext_job,
     ogh_order_photo_upload_job,
@@ -82,12 +80,6 @@ def run_lens_pipeline() -> None:
     stroymonitoring_sync_job.run()
 
 
-def run_genplan_pipeline() -> None:
-    """Run genplan_fetch then genplan import (05:00 chain)."""
-    genplan_fetch_job.run()
-    genplan_job.run()
-
-
 def run_genplan_upload_pipeline() -> None:
     """Upload local photos, fetch their meta from MSI Holes, import any JSON."""
     genplan_upload_job.run()
@@ -106,15 +98,12 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
     jobs: dict[str, Callable[[], None]] = {
         "data_mos": data_mos_job.run_all_data_mos,
         "ogh_analiz_sync": ogh_analiz_sync_job.run,
-        "ogh_analiz_sync_orders": ogh_analiz_sync_job.run_orders_once,
-        "ogh_disruption": ogh_disruption_job.run,
         "ogh_disruption_topotext": ogh_disruption_topotext_job.run,
         "ogh_disruption_topo_texts": ogh_disruption_topo_texts_job.run,
         "ogh_disruption_crm_tasks": ogh_disruption_crm_tasks_job.run,
         "lens_pipeline": run_lens_pipeline,
         "lens_sync": lens_sync_job.run,
         "stroymonitoring_sync": stroymonitoring_sync_job.run,
-        "genplan_fetch": genplan_fetch_job.run,
         "genplan_fetch_uploaded": genplan_fetch_uploaded_job.run,
         "genplan_fetch_uuid_api": genplan_fetch_uuid_api_job.run,
         "genplan": genplan_job.run,
@@ -124,9 +113,9 @@ def _build_jobs() -> dict[str, Callable[[], None]]:
         "backfill_ai_photo_tasks": backfill_ai_photo_tasks_job.run,
         "backfill_data_mos_crm_tasks": backfill_data_mos_crm_tasks_job.run,
         "crm_task_sync_audit": crm_task_sync_audit_job.run,
-        "genplan_pipeline": run_genplan_pipeline,
         "genplan_upload_pipeline": run_genplan_upload_pipeline,
         "genplan_uuid_api_pipeline": run_genplan_uuid_api_pipeline,
+        "db_backup": db_backup_job.run,
         "vector_stroy_url_222": vector_stroy_job.run,
         "ozn_excel_inbox": ozn_excel_inbox_job.run,
         "ogh_order_photo_upload": ogh_order_photo_upload_job.run,
@@ -147,7 +136,6 @@ JOBS = _build_jobs()
 RUN_ALL_ORDER: tuple[str, ...] = (
     "ogh_analiz_sync",
     "data_mos",
-    "ogh_disruption",
     "lens_pipeline",
     "vector_stroy_url_222",
 )
@@ -218,6 +206,15 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
+        db_backup_job.run,
+        CronTrigger(hour=6, minute=30, timezone=TZ),
+        id="db_backup",
+        name="pg_dump daily (keep 1 day); Fridays weekly (keep 7 days)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
         genplan_confirm_job.run,
         CronTrigger(hour=18, minute=30, timezone=TZ),
         id="genplan_confirm",
@@ -283,13 +280,13 @@ def start_scheduler() -> None:
         ", ".join(c.job_name for c in DATA_MOS_MONTHLY_EXPORTS),
     )
     logger.info("  02:00 — ogh_analiz_sync (mggt_asu gis.ogh_analiz, read-only)")
-    logger.info("  03:00 — data_mos (%s services), then ogh_disruption", len(DATA_MOS_EXPORTS))
+    logger.info("  03:00 — data_mos (%s services)", len(DATA_MOS_EXPORTS))
     for config in DATA_MOS_EXPORTS:
         logger.info("         — %s", config.job_name)
-    logger.info("         — ogh_disruption (mggt_dgn/mggt_dgn.geojson, if present)")
     logger.info("  03:30 — crm_task_sync_audit")
     logger.info("  04:00 — lens_pipeline (lens_sync → stroymonitoring_sync)")
-    logger.info("  06:00 — vector_stroy_url_222")
+    logger.info("  06:00 — vector_stroy_url_222 (ORBISmap API export)")
+    logger.info("  06:30 — db_backup (pg_dump; Fridays also weekly)")
     logger.info("  18:30 — genplan_confirm (CRM snapshots → MSI confirm)")
     logger.info("  22:00 — ogh_disruption_topotext (mggt_asu topopassport.topotext)")
     logger.info("  22:15 — ogh_disruption_topo_texts (mggt t500.topo_texts)")
@@ -297,7 +294,6 @@ def start_scheduler() -> None:
     logger.info("  23:00 — situation_photo_upload (situation fnm → genplan API)")
     logger.info("  23:30 — ogh_order_photo_upload (Заказы/02_Поле/Фото → genplan API)")
     logger.info("  every 15s — ozn_excel_inbox (excel_inbox → ozn_date/executor)")
-    logger.info("  (genplan_pipeline — manual only: --run genplan_pipeline)")
     logger.info("  (genplan_upload — manual only: --run genplan_upload)")
     logger.info("  (genplan_fetch_uploaded — manual only: --run genplan_fetch_uploaded)")
     logger.info("  (genplan_fetch_uuid_api — manual only: --run genplan_fetch_uuid_api)")
@@ -305,7 +301,6 @@ def start_scheduler() -> None:
     logger.info("  (genplan_confirm — also --run genplan_confirm; cron 18:30)")
     logger.info("  (backfill_ai_photo_tasks — manual only: --run backfill_ai_photo_tasks)")
     logger.info("  (backfill_data_mos_crm_tasks — manual only: --run backfill_data_mos_crm_tasks)")
-    logger.info("  (ogh_analiz_sync_orders — manual only: --run ogh_analiz_sync_orders)")
     logger.info("  (ogh_order_photo_upload_dry — manual only: --run ogh_order_photo_upload_dry)")
     logger.info("  (situation_photo_upload_dry — manual only: --run situation_photo_upload_dry)")
     try:

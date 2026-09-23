@@ -9,15 +9,14 @@ Docker-okruzhenie s PostGIS i planirovshchikom ETL-zadach.
 | 00:01 | `genplan_uuid_api_pipeline` | UUID iz `genplan.uuid_api` → meta MSI → `crm.tasks` (disruption) → skachivanie foto v `downloaded_photo/` |
 | 01:00 (1-ya sb mesyatsa) | `data_mos_60562` | Eksport `data_mos_export_60562.py` → TRUNCATE + load v `data_mos.items_60562` (bez purge i geom split) |
 | 02:00 | `ogh_analiz_sync` | Read-only `gis.ogh_analiz` iz `mggt_asu` → `odh_export.ogh_analiz` (MSK-77 SRID 980077 → WGS-84), insert/update po `id`, udalenie ischeznuvshikh |
-| 03:00 | `data_mos` | Vse 8 ezhednevnykh eksportov `data_mos_export_*.py` → `data_mos.items_<id>`; zatem `ogh_disruption`: esli est `mggt_dgn/mggt_dgn.geojson` — upsert v `odh_export."ogh-disruption"` po `(source_json, lon, lat)` — slivanie tolko pri sovpadenii koordinat, udalenie fayla |
+| 03:00 | `data_mos` | Vse 8 ezhednevnykh eksportov `data_mos_export_*.py` → `data_mos.items_<id>` |
 | 04:00 | `lens_pipeline` | `lens_sync` (SPS → `lens`), zatem `stroymonitoring_sync` (web_geo → `stroymonitoring`) |
+| 06:30 | `db_backup` | `pg_dump -Fc` v `backups/` (host: `/opt/monitor/backups`): daily — retention 1 den'; po pyatnitsam dopolnitelno weekly — retention 7 dney. Vosstanovlenie: `pg_restore -h localhost -U monitor -d monitor --clean <fayl>` |
 | 06:00 | `vector_stroy_url_222` | ORBISmap REST API `vector.mggt.ru` (`POST /login/` po `VECTOR_API_USERNAME/PASSWORD`, zatem `GET map221/layers/rs_2022/export/` geojson 4326), DROP + upsert v `vector_stroy.url_222` po `orbis_id`, purge status s «истек», zatem udalenie fayla; bez kredov ili pri oshibke API — propusk |
 | 18:30 | `genplan_confirm` | UUID foto iz CRM-snimkov (`tasks_field` / `tasks_delay` / `tasks_done_*` → confirm true; `tasks_clear` → false) → MSI `PATCH /api/photos/{uuid}/confirm`. Bez `cam_id` — skip. False ne shlyotsya, esli tot zhe `cam_id` uzhe v true-snimkakh. |
 | 22:00 | `ogh_disruption_topotext` | Read-only `topopassport.topotext` iz `mggt_asu` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` |
 | 22:15 | `ogh_disruption_topo_texts` | Read-only `t500.topo_texts` iz `mggt` → `odh_export."ogh-disruption"` (MSK-77 SRID 980077 → Point 4326). Pervyy zapusk: 50 samykh novykh po `fid`; dalee tolko `fid` vyshe watermark `source_fid` pri `filter_pass=topo_texts` |
 | 22:25 | `ogh_disruption_crm_tasks` | Novye stroki `odh_export."ogh-disruption"` → `crm.tasks` (tip «Разрытия», `ogh_id` = `id`). Tolko otsutstvuyushchie `ogh_id` (`NOT EXISTS`) |
-
-`genplan_pipeline` (`genplan_fetch` + import) — **tolko ruchnoy zapusk**: `--run genplan_pipeline`
 
 `genplan_upload` — zagruzka fotografiy iz `photo_to_upload/` v MSI Holes API (`POST /api/upload`); otvet zapisyvaetsya v `genplan.uploaded_photo`. Posle uspekha fayl peremeshchaetsya v `photo_uploaded/`. Zapusk: `--run genplan_upload` ili tsepochka `--run genplan_upload_pipeline` (upload → `genplan_fetch_uploaded` → import).
 
@@ -149,6 +148,25 @@ WHERE p.derived_from_id IS NOT NULL
 LIMIT 5;
 ```
 
+## Bekapy BD (`db_backup`, 06:30)
+
+Ezhednevno `pg_dump -Fc` (szhatyy custom-format) v `backups/` (cherez bind `.:/app` — na hoste `/opt/monitor/backups`):
+
+- `monitor_GGGGMMDD_HHMM.daily.dump` — retention **1 den'** (vtorichnyy daily udalyaetsya posle zapisi novogo);
+- po pyatnitsam dopolnitelno `monitor_GGGGMMDD_HHMM.weekly.dump` — retention **7 dney**.
+
+Peremennye (`.env`): `DB_BACKUP_DAILY_KEEP_DAYS=1`, `DB_BACKUP_WEEKLY_KEEP_DAYS=7`.
+
+```bash
+# ruchnoy zapusk
+docker compose exec collector python -m collector.scheduler --run db_backup
+
+# vosstanovlenie
+pg_restore -h localhost -U monitor -d monitor --clean /opt/monitor/backups/<fayl>.dump
+```
+
+Klient `pg_dump` vstrom v obraz `collector` (Dockerfile, postgresql-client-16 iz PGDG). Posle pervogo zapuska proverit mesto: `du -sh /opt/monitor/backups; df -h /`.
+
 ## Bystryy start
 
 ```bash
@@ -186,7 +204,6 @@ docker compose exec collector python -m collector.scheduler --run data_mos_60562
 docker compose exec collector python -m collector.scheduler --run lens_pipeline
 docker compose exec collector python -m collector.scheduler --run lens_sync
 docker compose exec collector python -m collector.scheduler --run stroymonitoring_sync
-docker compose exec collector python -m collector.scheduler --run genplan_pipeline
 docker compose exec collector python -m collector.scheduler --run genplan_fetch
 docker compose exec collector python -m collector.scheduler --run genplan_fetch_uploaded
 docker compose exec collector python -m collector.scheduler --run genplan_fetch_uuid_api
@@ -195,7 +212,6 @@ docker compose exec collector python -m collector.scheduler --run genplan_downlo
 docker compose exec collector python -m collector.scheduler --run genplan_confirm
 docker compose exec collector python -m collector.scheduler --run backfill_ai_photo_tasks
 docker compose exec collector python -m collector.scheduler --run genplan
-docker compose exec collector python -m collector.scheduler --run ogh_disruption
 docker compose exec collector python -m collector.scheduler --run ogh_disruption_topotext
 docker compose exec collector python -m collector.scheduler --run ogh_disruption_topo_texts
 docker compose exec collector python -m collector.scheduler --run ogh_disruption_crm_tasks
@@ -351,8 +367,6 @@ MSI Holes credentials **ne v git** (`.gitignore`: `genplan api/msi-holes-backend
 
 ## Genplan (`jsons_genplan/`)
 
-`genplan_pipeline` (spatial_search + import) — **tolko ruchnoy** zapusk: `--run genplan_pipeline`. Shagi: `genplan_fetch` zabiraet dannye iz MSI Holes API (`POST /api/spatial_search`, `GET /api/photos/meta/{uuid}`), zatem `genplan` importiruet JSON v BD.
-
 Ezhednevnyy sbornik po UUID ot kolleg — otdelno: `genplan_uuid_api_pipeline` v **00:01** (sm. nizhe).
 
 Peremennye okruzheniya (v `.env`):
@@ -367,7 +381,7 @@ GENPLAN_SEARCH_LNG=37.6173
 GENPLAN_SEARCH_RADIUS_M=20000
 ```
 
-Po umolchaniyu poisk vypolnyaetsya v radius **20 km** ot tsentra Moskvy (`GENPLAN_SEARCH_RADIUS_M=20000`). Polnyy progon pri bolshom chisle UUID mozhet zanyat desyatki minut i dolshe; povtornyy `genplan_pipeline` dozagruzhaet tolko novye UUID.
+Po umolchaniyu poisk vypolnyaetsya v radius **20 km** ot tsentra Moskvy (`GENPLAN_SEARCH_RADIUS_M=20000`).
 
 JSON-fayly v papke `jsons_genplan/` (v korne proekta, v Docker — `/app/jsons_genplan`). Tip opredelyaetsya po strukture, ne po imeni fayla:
 
