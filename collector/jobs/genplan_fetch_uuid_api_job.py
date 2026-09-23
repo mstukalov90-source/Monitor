@@ -8,6 +8,7 @@ import httpx
 
 from collector.config import (
     GENPLAN_FETCH_UUID_API_LIMIT,
+    GENPLAN_FETCH_UUID_API_PENDING_MAX_DAYS,
     MSI_HOLES_BASE_URL,
     MSI_HOLES_CLIENT_ID,
     MSI_HOLES_CLIENT_SECRET,
@@ -51,7 +52,10 @@ def run() -> None:
 
     with local_connection() as conn:
         with conn.cursor() as cur:
-            pending_uuids = load_uuid_api_uuids_pending_meta(cur)
+            pending_uuids = load_uuid_api_uuids_pending_meta(
+                cur,
+                max_pending_days=GENPLAN_FETCH_UUID_API_PENDING_MAX_DAYS,
+            )
 
     with local_connection() as conn:
         run_id = log_job_run(

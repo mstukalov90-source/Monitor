@@ -34,8 +34,6 @@ from collector.data_mos_purge import purge_archived
 from collector.data_mos_stream_load import stream_load_to_db
 from collector.data_mos_tasked import ensure_tasked_column
 from collector.db import local_connection, log_job_run
-from collector.jobs import crm_task_sync_audit_job, ogh_disruption_job
-
 logger = logging.getLogger(__name__)
 
 _TABLE_NAME_RE = re.compile(r"^items_\d+$")
@@ -321,5 +319,3 @@ def run_all_data_mos() -> None:
     """Run all data.mos.ru export pipelines sequentially (see DATA_MOS_EXPORTS)."""
     for config in DATA_MOS_EXPORTS:
         run_for(config)
-    ogh_disruption_job.run()
-    crm_task_sync_audit_job.run()

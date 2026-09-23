@@ -88,6 +88,42 @@ def ensure_table(
     logger.info("Created %s.%s", local_schema, table_name)
 
 
+def align_columns(
+    local_conn,
+    local_schema: str,
+    local_table: str,
+    columns: list[dict],
+) -> list[str]:
+    """Add remote columns missing locally so schema drift cannot break the copy.
+
+    Remote sources evolve (web_geo added boundaries_aip.aip_inclusion_date
+    after our copy was created); ensure_table only creates missing tables, so
+    without this the TRUNCATE+INSERT referencing the new column fails.
+    """
+    local_columns = {
+        c["column_name"]
+        for c in get_table_columns(local_conn, local_schema, local_table)
+    }
+    added: list[str] = []
+    with local_conn.cursor() as cur:
+        for c in columns:
+            name = c["column_name"]
+            if name in local_columns:
+                continue
+            cur.execute(
+                sql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS {} {}").format(
+                    sql.Identifier(local_schema),
+                    sql.Identifier(local_table),
+                    sql.Identifier(name),
+                    sql.SQL(postgres_type(c)),
+                )
+            )
+            added.append(name)
+    if added:
+        logger.info("Added columns %s to %s.%s", added, local_schema, local_table)
+    return added
+
+
 def sync_table(
     remote_conn,
     local_conn,
@@ -102,6 +138,7 @@ def sync_table(
         return 0
 
     ensure_table(local_conn, local_schema, local_table, columns)
+    align_columns(local_conn, local_schema, local_table, columns)
     col_names = [c["column_name"] for c in columns]
 
     with remote_conn.cursor() as rcur:

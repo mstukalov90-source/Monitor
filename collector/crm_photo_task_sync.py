@@ -117,6 +117,12 @@ def _reuse_ai_photo_tasks(cur: Any) -> int:
         ) existing ON TRUE
         WHERE ct.key = existing.key
           AND ct.photo_uuid IS DISTINCT FROM src.uuid
+          AND NOT EXISTS (
+              SELECT 1
+              FROM crm.tasks blocker
+              WHERE blocker.photo_uuid = src.uuid
+                AND blocker.key <> ct.key
+          )
     """
     cur.execute(query, [AI_PHOTO_SYNC.source_table, audit])
     return cur.rowcount

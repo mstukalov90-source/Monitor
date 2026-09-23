@@ -50,6 +50,17 @@ class CrmPhotoTaskSyncSqlTests(unittest.TestCase):
         self.assertIn("ARRAY[%s]::text[]", sql)
         self.assertEqual(cur.execute.call_args[0][1][0], "genplan.photo_meta")
 
+    def test_reuse_ai_photo_skips_uuid_held_by_other_task(self) -> None:
+        """Regression: duplicate per-camera tasks must not collide on photo_uuid."""
+        cur = MagicMock()
+        cur.rowcount = 0
+        updated = _reuse_ai_photo_tasks(cur)
+        self.assertEqual(updated, 0)
+        sql = cur.execute.call_args[0][0]
+        self.assertIn("FROM crm.tasks blocker", sql)
+        self.assertIn("blocker.photo_uuid = src.uuid", sql)
+        self.assertIn("blocker.key <> ct.key", sql)
+
     def test_lens_insert_has_not_exists_and_external_report_id(self) -> None:
         cur = MagicMock()
         cur.rowcount = 12

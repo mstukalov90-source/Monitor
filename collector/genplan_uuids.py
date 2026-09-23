@@ -213,44 +213,63 @@ def load_uploaded_uuids_pending_meta(cur: Cursor) -> list[str]:
     return [row[0] for row in cur.fetchall()]
 
 
-def load_uuid_api_uuids_pending_meta(cur: Cursor) -> list[str]:
-    """Return uuid_api UUIDs missing from photo_meta or not yet done."""
+def load_uuid_api_uuids_pending_meta(
+    cur: Cursor,
+    *,
+    max_pending_days: int = 0,
+) -> list[str]:
+    """Return uuid_api UUIDs missing from photo_meta or not yet done.
+
+    max_pending_days > 0 excludes UUIDs older than that many days: meta that
+    never appears (permanent 404) stops being retried every night.
+    """
     if not _table_exists(cur, "genplan", "uuid_api"):
         return []
 
     has_status = _table_has_column(cur, "genplan", "photo_meta", "status")
     has_pm_uuid = _table_has_column(cur, "genplan", "photo_meta", "uuid")
+    age_filter = ""
+    params: list = []
+    if max_pending_days > 0:
+        age_filter = "AND ua.loaded_at >= NOW() - (%s::int * INTERVAL '1 day')"
+        params.append(max_pending_days)
 
     if has_pm_uuid and has_status:
         cur.execute(
-            """
+            f"""
             SELECT ua.uuid
             FROM genplan.uuid_api ua
             LEFT JOIN genplan.photo_meta pm ON pm.uuid = ua.uuid
             WHERE ua.uuid IS NOT NULL AND btrim(ua.uuid) <> ''
               AND (pm.uuid IS NULL OR pm.status IS DISTINCT FROM 'done')
+              {age_filter}
             ORDER BY ua.loaded_at
-            """
+            """,
+            params,
         )
     elif has_pm_uuid:
         cur.execute(
-            """
+            f"""
             SELECT ua.uuid
             FROM genplan.uuid_api ua
             LEFT JOIN genplan.photo_meta pm ON pm.uuid = ua.uuid
             WHERE ua.uuid IS NOT NULL AND btrim(ua.uuid) <> ''
               AND pm.uuid IS NULL
+              {age_filter}
             ORDER BY ua.loaded_at
-            """
+            """,
+            params,
         )
     else:
         cur.execute(
-            """
+            f"""
             SELECT ua.uuid
             FROM genplan.uuid_api ua
             WHERE ua.uuid IS NOT NULL AND btrim(ua.uuid) <> ''
+            {age_filter}
             ORDER BY ua.loaded_at
-            """
+            """,
+            params,
         )
 
     return [row[0] for row in cur.fetchall()]

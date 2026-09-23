@@ -86,7 +86,7 @@ class ProcessFileTests(unittest.TestCase):
     @patch.object(job, "local_connection")
     @patch.object(job, "_ensure_tables")
     @patch.object(job, "_insert_log")
-    def test_corrupt_file_logs_failed_and_deletes(
+    def test_corrupt_file_logs_failed_and_moves_to_failed_dir(
         self,
         mock_insert: MagicMock,
         _mock_ensure: MagicMock,
@@ -104,6 +104,8 @@ class ProcessFileTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertTrue(result.error_message)
         self.assertFalse(path.exists())
+        failed_copy = self.tmp / "failed" / "bad.xlsx"
+        self.assertTrue(failed_copy.exists())
         mock_insert.assert_called_once()
         self.assertEqual(mock_insert.call_args.kwargs["result"].status, "failed")
 

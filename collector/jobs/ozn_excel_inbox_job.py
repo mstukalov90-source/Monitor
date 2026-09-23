@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -313,10 +314,31 @@ def process_file(path: Path) -> FileProcessResult:
             logger.exception("failed to write ozn_upload_log for %s", file_name)
         return result
     finally:
+        if result.status == "success":
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("could not delete %s: %s", path, exc)
+        else:
+            _move_to_failed(path)
+
+
+def _move_to_failed(path: Path) -> None:
+    """Keep failed files for manual inspection instead of deleting them."""
+    failed_dir = path.parent / "failed"
+    try:
+        failed_dir.mkdir(parents=True, exist_ok=True)
+        target = failed_dir / path.name
+        if target.exists():
+            target = failed_dir / f"{path.stem}_{int(time.time())}{path.suffix}"
+        shutil.move(str(path), str(target))
+        logger.warning("moved failed excel %s to %s", path.name, target)
+    except OSError as exc:
+        logger.warning("could not move %s to failed/: %s", path, exc)
         try:
             path.unlink(missing_ok=True)
-        except OSError as exc:
-            logger.warning("could not delete %s: %s", path, exc)
+        except OSError:
+            pass
 
 
 def run() -> None:

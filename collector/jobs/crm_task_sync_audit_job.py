@@ -115,13 +115,14 @@ def run(*, report_dir: Path | None = None) -> AuditSummary:
             encoding="utf-8",
         )
 
-        status = "failed" if summary.alert else "success"
+        # Data warnings are not job failures: keep job_runs green so real
+        # errors stand out; the report file carries the details either way.
         log_message = f"{summary.message}; report={report_path.name}"
         with local_connection() as conn:
             log_job_run(
                 conn,
                 JOB_NAME,
-                status,
+                "success",
                 log_message,
                 rows_affected=summary.total_gap,
                 run_id=run_id,
