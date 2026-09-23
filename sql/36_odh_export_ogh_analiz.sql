@@ -50,7 +50,11 @@ ALTER TABLE odh_export.ogh_analiz
     ADD COLUMN IF NOT EXISTS executor text,
     ADD COLUMN IF NOT EXISTS status text;
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_ogh_analiz_ordername
+-- "OrderName" is NOT unique: the source re-issues names under new ids, which
+-- breaks the id-based upsert (see sql/49). Plain index serves the ozn lookups.
+DROP INDEX IF EXISTS odh_export.ux_ogh_analiz_ordername;
+
+CREATE INDEX IF NOT EXISTS ix_ogh_analiz_ordername
     ON odh_export.ogh_analiz ("OrderName");
 
 CREATE INDEX IF NOT EXISTS idx_ogh_analiz_geometry
